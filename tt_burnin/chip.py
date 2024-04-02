@@ -13,6 +13,7 @@ from pyluwen import PciChip, Telemetry
 from pyluwen import detect_chips as luwen_detect_chips
 from pyluwen import detect_chips_fallible as luwen_detect_chips_fallible
 
+
 class TTChip:
     def __init__(self, chip: PciChip):
         self.luwen_chip = chip
@@ -147,11 +148,13 @@ class TTChip:
     def _int_to_bits(self, x):
         return list(filter(lambda b: x & (1 << b), range(x.bit_length())))
 
+
 def reverse_mapping_list(l):
     ret = [0] * len(l)
     for idx, val in enumerate(l):
         ret[val] = idx
     return ret
+
 
 class WhChip(TTChip):
     def __init__(self, *args, **kwargs):
@@ -317,4 +320,3 @@ def detect_chips(local_only: bool = False) -> list[Union[GsChip, WhChip]]:
             raise ValueError("Did not recognize board")
 
     return output
-
