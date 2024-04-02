@@ -47,7 +47,7 @@ def start_burnin_gs(device, keep_trisc_under_reset: bool = False):
     to_deassert = load_ttx_file(
         device,
         TtxFile(
-            "/mnt/motor/syseng/ttx-bank/wh_B0/pv_workloads/build_pv_ssmodes_sync_v3_fp32acc_dcache_off/single-core-matrix-inf-loop-20act.80wght-lf8.ttx"
+            "/mnt/motor/syseng/ttx-bank/power-virus/single-core-conv.loop.pm_enabled.20act.0wght.ttx"
         ),
         {CoreId(0, 0): device.get_tensix_locations()},
     )
