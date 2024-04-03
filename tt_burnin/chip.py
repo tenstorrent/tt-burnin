@@ -19,6 +19,8 @@ class TTChip:
         self.luwen_chip = chip
         self.interface_id = chip.pci_interface_id()
 
+        self._harvesting_bits = None
+
         self.telmetry_cache = None
 
     def reinit(self, callback=None):
@@ -71,6 +73,13 @@ class TTChip:
             self.telmetry_cache = self.luwen_chip.get_telemetry()
 
         return self.telmetry_cache
+
+    def get_harvest_bits(self) -> int:
+        if self._harvesting_bits is None:
+            # Magic value to get harvesting info
+            (bad_row_bits, _) = self.arc_msg(0x57)
+            self._harvesting_bits = bad_row_bits
+        return self._harvesting_bits
 
     def __vnum_to_version(self, version: int) -> tuple[int, int, int, int]:
         return (
@@ -179,7 +188,7 @@ class WhChip(TTChip):
         all_tensix_cols = [1, 2, 3, 4, 6, 7, 8, 9]
 
         # Magic value to get harvesting info
-        (bad_row_bits, _) = self.arc_msg(0x57)
+        bad_row_bits = self.get_harvest_bits()
 
         bad_row_bits = bad_row_bits << 1
 
@@ -200,6 +209,14 @@ class WhChip(TTChip):
     def __repr__(self):
         return f"Wormhole[{self.interface_id}]"
 
+class RemoteWhChip(WhChip):
+    def noc_broadcast(self, noc: int, addr: int, data: bytes):
+        for core in self.get_tensix_locations():
+            self.luwen_chip.noc_write(noc, *core, addr, data)
+
+    def noc_broadcast32(self, noc: int, addr: int, data: int):
+        for core in self.get_tensix_locations():
+            self.luwen_chip.noc_write32(noc, *core, addr, data)
 
 class GsChip(TTChip):
     def __init__(self, *args, **kwargs):
@@ -220,8 +237,7 @@ class GsChip(TTChip):
         super().__init__(*args, **kwargs)
 
     def get_tensix_locations(self):
-        # Magic value to get harvesting info
-        (bad_row_bits, _) = self.arc_msg(0x57)
+        bad_row_bits = self.get_harvest_bits()
 
         bad_physical_rows = self._int_to_bits(bad_row_bits)
 
@@ -242,6 +258,9 @@ class GsChip(TTChip):
 
     def min_fw_version(self):
         return 0x1050000
+
+    def set_default_tlb(self, index: int):
+        self.luwen_chip.set_default_tlb(index)
 
     def __repr__(self):
         return f"Grayskull[{self.interface_id}]"
@@ -315,7 +334,10 @@ def detect_chips(local_only: bool = False) -> list[Union[GsChip, WhChip]]:
         if device.as_gs() is not None:
             output.append(GsChip(device.as_gs()))
         elif device.as_wh() is not None:
-            output.append(WhChip(device.as_wh()))
+            if device.is_remote():
+                output.append(RemoteWhChip(device.as_wh()))
+            else:
+                output.append(WhChip(device.as_wh()))
         else:
             raise ValueError("Did not recognize board")
 

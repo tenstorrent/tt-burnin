@@ -30,8 +30,13 @@ def start_burnin_gs(device, keep_trisc_under_reset: bool = False):
         STAGGERED_START_ENABLE = (1 << 31) if stagger_start else 0
 
     # Put tensix under soft reset
+    # for core in device.get_tensix_locations():
+    #     device.noc_write32(
+    #         0, *core, 0xFFB121B0, BRISC_SOFT_RESET | TRISC_SOFT_RESETS | NCRISC_SOFT_RESET
+    #     )
+
     device.noc_broadcast32(
-        0, 0xFFB121B0, BRISC_SOFT_RESET | TRISC_SOFT_RESETS | NCRISC_SOFT_RESET
+       0, 0xFFB121B0, BRISC_SOFT_RESET | TRISC_SOFT_RESETS | NCRISC_SOFT_RESET
     )
 
     # Clear L1
@@ -57,7 +62,7 @@ def start_burnin_gs(device, keep_trisc_under_reset: bool = False):
             NCRISC_SOFT_RESET | TRISC_SOFT_RESETS | STAGGERED_START_ENABLE
         )
     else:
-        soft_reset_value = NCRISC_SOFT_RESET | STAGGERED_START_ENABLE
+       soft_reset_value = NCRISC_SOFT_RESET | STAGGERED_START_ENABLE
 
     # Take cores out of reset
     device.noc_broadcast32(0, 0xFFB121B0, soft_reset_value)
@@ -164,7 +169,7 @@ def parse_args():
 def main():
     args = parse_args()
 
-    devices = detect_local_chips()
+    devices = detect_chips()
 
     try:
         for device in devices:
