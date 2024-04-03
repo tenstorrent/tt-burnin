@@ -1,14 +1,35 @@
 # SPDX-FileCopyrightText: © 2024 Tenstorrent AI ULC
 # SPDX-License-Identifier: Apache-2.0
-
+"""
+Tenstorrent Burnin (TT-Burnin) is a command line utility
+to run a high power consumption workload on TT devices.
+"""
 from __future__ import annotations
 
-import tt_burnin
-from tt_burnin.chip import detect_chips, detect_local_chips, GsChip, WhChip
-from tt_burnin.load_ttx import load_ttx_file, TtxFile, CoreId
-
+import os
+import sys
+import time
 import argparse
+import tt_burnin
+from rich.live import Live
+from rich.text import Text
+from rich.console import Group
 from importlib.resources import path
+from tt_burnin.chip import GsChip, WhChip, RemoteWhChip
+from tt_burnin.load_ttx import load_ttx_file, TtxFile, CoreId
+from tt_tools_common.ui_common.themes import CMD_LINE_COLOR
+from tt_burnin.utils import (
+    parse_reset_input,
+    mobo_reset_from_json,
+    pci_indices_from_json,
+    pci_board_reset,
+    print_all_available_devices,
+    generate_table,
+)
+from tt_tools_common.utils_common.tools_utils import (
+    get_board_type,
+    detect_chips_with_callback,
+)
 
 
 def start_burnin_gs(
@@ -45,6 +66,30 @@ def start_burnin_gs(
 
     # Take cores out of reset
     device.noc_broadcast32(0, 0xFFB121B0, soft_reset_value)
+
+
+def reset_all_devices(devices, reset_filename=None):
+    """Reset all devices"""
+    print(CMD_LINE_COLOR.BLUE, "Resetting devices on host...", CMD_LINE_COLOR.ENDC)
+    LOG_FOLDER = os.path.expanduser("~/.config/tenstorrent")
+    log_filename = f"{LOG_FOLDER}/reset_config.json"
+    # If input is just reset board
+    if not reset_filename:
+        log_filename = reset_filename
+    data = parse_reset_input(log_filename)
+    if data:
+        # reset using the json file
+        parsed_dict = mobo_reset_from_json(data)
+        pci_indices, reinit = pci_indices_from_json(parsed_dict)
+        if pci_indices:
+            pci_board_reset(pci_indices, reinit)
+    else:
+        # reset all boards
+        dev_ids = []
+        for device in devices:
+            if not device.is_remote():
+                dev_ids.append(device.get_pci_interface_id())
+        pci_board_reset(dev_ids, reinit=True)
 
 
 def stop_burnin_gs(device):
@@ -121,17 +166,49 @@ def parse_args():
         action="version",
         version=tt_burnin.__version__,
     )
-
-    subparsers = parser.add_subparsers(title="command", dest="command", required=True)
+    parser.add_argument(
+        "--reset_file",
+        type=parse_reset_input,
+        metavar="reset_config.json",
+        default=None,
+        help=(
+            "Provide a custom reset json file for the host."
+            "Generate a default reset json file with the -g option with tt-smi."
+        ),
+        dest="reset",
+    )
+    # subparsers = parser.add_subparsers(title="command", dest="command", required=True)
+    return parser.parse_args()
 
 
 def main():
     args = parse_args()
-
-    devices = detect_chips()
+    os.environ["RUST_BACKTRACE"] = "full"
+    # Allow non blocking read for accepting user input before stopping burnin
+    os.set_blocking(sys.stdin.fileno(), False)
+    devices = detect_chips_with_callback()
+    devs = []
+    for device in devices:
+        if device.as_gs() is not None:
+            devs.append(GsChip(device.as_gs()))
+        elif device.as_wh() is not None:
+            if device.is_remote():
+                devs.append(RemoteWhChip(device.as_wh()))
+            else:
+                devs.append(WhChip(device.as_wh()))
+        else:
+            raise ValueError("Did not recognize board")
+    print_all_available_devices(devices)
+    reset_all_devices(devices, reset_filename=args.reset)
 
     try:
-        for device in devices:
+        print()
+        print(
+            CMD_LINE_COLOR.BLUE,
+            "Starting TT-Burnin workload on all boards. WARNING: Opening SMI might cause unexpected behavior",
+            CMD_LINE_COLOR.ENDC,
+        )
+        for device in devs:
             if isinstance(device, GsChip):
                 start_burnin_gs(device)
             elif isinstance(device, WhChip):
@@ -139,14 +216,35 @@ def main():
             else:
                 raise NotImplementedError(f"Don't support {device}")
 
-        input(
-            "Press Enter to STOP TT-Burnin on all boards (Please close all other processes running on the boards FIRST)"
+        text = Text(
+            " Press Enter to STOP TT-Burnin on all boards...", style="bold yellow"
         )
+
+        # Create a live update for telemetry widget
+        with Live(Group(generate_table(devices), text), refresh_per_second=10) as live:
+            while True:
+                # Break if there is any user keypress
+                c = sys.stdin.read(1)
+                if len(c) > 0:
+                    break
+                live.update(Group(generate_table(devices), text))
+                time.sleep(0.1)
+
     finally:
-        for device in devices:
+        print()
+        print(
+            CMD_LINE_COLOR.GREEN,
+            "Stopping TT-Burnin workload on all boards.",
+            CMD_LINE_COLOR.ENDC,
+        )
+        print()
+        for device in devs:
             if isinstance(device, GsChip):
                 stop_burnin_gs(device)
             elif isinstance(device, WhChip):
                 stop_burnin_wh(device)
             else:
                 raise NotImplementedError(f"Don't support {device}")
+
+        # Final reset to restore state
+        reset_all_devices(devices, reset_filename=args.reset)
