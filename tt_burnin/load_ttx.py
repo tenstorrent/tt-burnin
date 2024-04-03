@@ -1,6 +1,8 @@
 # SPDX-FileCopyrightText: © 2024 Tenstorrent AI ULC
 # SPDX-License-Identifier: Apache-2.0
 
+from __future__ import annotations
+
 __all__ = ["CoreId", "TtxFile", "load_ttx_file", "TtxCompletionChecks"]
 
 from dataclasses import dataclass
@@ -123,6 +125,52 @@ def read_bin_image_chunks(f: IO[bytes]) -> Iterable[Tuple[int, bytes]]:
         yield (chunk_header.address, chunk_data)
 
 
+def read_hex_image_chunks(f: IO[bytes]) -> Iterable[Tuple[int, bytes]]:
+    buffer = bytearray()
+    addr = None
+    for line in f.readlines():
+        if len(line.strip()) > 0:
+            if line.startswith(b"@"):
+                if len(buffer) > 0:
+                    assert addr is not None
+                    yield addr, buffer
+                addr = int(f"0x{line[1:].strip().decode()}", 0)
+                buffer = bytearray()
+            else:
+                buffer.extend(
+                    int(f"0x{line.strip().decode()}", 0).to_bytes(4, "little")
+                )
+
+    if len(buffer) > 0:
+        assert addr is not None
+        yield addr, buffer
+
+
+def load_hex(chip: Chip, cores: Optional[Collection[CoreId]], bin: IO[bytes]) -> None:
+    for address, data in read_hex_image_chunks(bin):
+        if cores is None:
+            for core in chip.get_tensix_locations():
+                chip.noc_write(0, *core, address, data)
+            # chip.noc_broadcast(0, address, data)
+        else:
+            for core in cores:
+                chip.noc_write(0, *core, address, data)
+
+
+def check_hex(chip: Chip, cores: Optional[Collection[CoreId]], bin: IO[bytes]) -> None:
+    for address, data in read_hex_image_chunks(bin):
+        if cores is None:
+            cores = chip.get_tensix_locations()
+        for core in cores:
+            buffer = bytearray(len(data))
+            chip.noc_read(0, *core, address, buffer)
+            if buffer != data:
+                for b, d in zip(buffer, data):
+                    assert (
+                        b == d
+                    ), f"Failed to write to core {address} {core} ({b} != {d})"
+
+
 def load_bin(chip: Chip, cores: Optional[Collection[CoreId]], bin: IO[bytes]) -> None:
     for address, data in read_bin_image_chunks(bin):
         if cores is None:
@@ -139,7 +187,11 @@ def check_bin(chip: Chip, cores: Optional[Collection[CoreId]], bin: IO[bytes]) -
         for core in cores:
             buffer = bytearray(len(data))
             chip.noc_read(0, *core, address, buffer)
-            assert buffer == data, f"Failed to write to core {core}"
+            if buffer != data:
+                for b, d in zip(buffer, data):
+                    assert (
+                        b == d
+                    ), f"Failed to write to core {address} {core} ({b} != {d})"
 
 
 # core_mapping: use logical (source) to physical (target) mapping
@@ -195,22 +247,24 @@ def load_ttx_file(
     files["image.hex"] -= files["image.bin"]
     files["ckernels.hex"] -= files["ckernels.bin"]
 
-    if files["image.hex"] or files["ckernels.hex"]:
-        raise RuntimeError("TTXs with hex images are unsupported.")
-
     image_bins = files["image.bin"]
+    image_hex = files["image.hex"]
     ckernels_bins = files["ckernels.bin"]
+    ckernels_hex = files["ckernels.hex"]
+
     del files
 
-    if not image_bins:
+    if not image_bins and not image_hex:
         raise RuntimeError("TTX is empty.")
 
-    if len(ckernels_bins - image_bins) > 0:
+    if len(ckernels_bins.union(ckernels_hex) - image_bins.union(image_hex)) > 0:
         details = ", ".join(map(str, sorted(ckernels_bins - image_bins)))
         raise RuntimeError(f"TTX has cores with ckernels but no image. ({details})")
 
-    if len(image_bins - all_source_cores) > 0:
-        details = ", ".join(map(str, sorted(image_bins - all_source_cores)))
+    if len(image_bins.union(image_hex) - all_source_cores) > 0:
+        details = ", ".join(
+            map(str, sorted(image_bins.union(image_hex) - all_source_cores))
+        )
         raise RuntimeError(
             f"TTX has images for cores with no physical mapping. ({details})"
         )
@@ -221,8 +275,20 @@ def load_ttx_file(
         image_bin = f"{load_core}/image.bin"
         ckernels_bin = f"{load_core}/ckernels.bin"
 
-        load_bin(chip, target_cores, ttx.open(infolist[image_bin], mode="r"))
-        check_bin(chip, target_cores, ttx.open(infolist[image_bin], mode="r"))
+        image_hex = f"{load_core}/image.hex"
+        ckernels_hex = f"{load_core}/ckernels.hex"
+
+        if image_hex in infolist:
+            load_hex(chip, target_cores, ttx.open(infolist[image_hex], mode="r"))
+            check_hex(chip, target_cores, ttx.open(infolist[image_hex], mode="r"))
+
+        if ckernels_hex in infolist:
+            load_hex(chip, target_cores, ttx.open(infolist[ckernels_hex], mode="r"))
+            check_hex(chip, target_cores, ttx.open(infolist[ckernels_hex], mode="r"))
+
+        if image_bin in infolist:
+            load_bin(chip, target_cores, ttx.open(infolist[image_bin], mode="r"))
+            check_bin(chip, target_cores, ttx.open(infolist[image_bin], mode="r"))
 
         if ckernels_bin in infolist:
             load_bin(chip, target_cores, ttx.open(infolist[ckernels_bin], mode="r"))

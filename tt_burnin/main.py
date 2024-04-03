@@ -4,7 +4,7 @@
 from __future__ import annotations
 
 import tt_burnin
-from tt_burnin.chip import detect_local_chips, GsChip, WhChip
+from tt_burnin.chip import detect_chips, detect_local_chips, GsChip, WhChip
 from tt_burnin.load_ttx import load_ttx_file, TtxFile, CoreId
 
 import argparse
@@ -181,7 +181,6 @@ def main():
     finally:
         for device in devices:
             if isinstance(device, GsChip):
-                continue
                 stop_burnin_gs(device)
             elif isinstance(device, WhChip):
                 stop_burnin_wh(device)
