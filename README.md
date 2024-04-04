@@ -1,92 +1,107 @@
-# tt-burnin
+# TT-BURNIN
 
+Tenstorrent Burnin (TT-Burnin) is a command line utility to run a high power consumption workload on TT devices.
 
+## Official Repository
+
+[https://github.com/tenstorrent/tt-burnin/](https://github.com/tenstorrent/tt-burnin/)
 
 ## Getting started
+Build and editing instruction are as follows -
 
-To make it easy for you to get started with GitLab, here's a list of recommended next steps.
+### Building from Git
 
-Already a pro? Just edit this README.md and make it your own. Want to make it easy? [Use the template at the bottom](#editing-this-readme)!
+After cloning the repo, install and source rust for the luwen library
+```
+curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
+source "$HOME/.cargo/env"
+```
+Upgrade pip to the latest and install tt-burnin
+```
+pip3 install --upgrade pip
+pip3 install .
+```
+### Optional - for TT-Tools developers
 
-## Add your files
+Generate and source a python3 environment
+```
+python3 -m venv .venv
+source .venv/bin/activate
+pip3 install --upgrade pip
+```
+For users who would like to edit the code without re-building, install burnin in editable mode.
+```
+pip3 install --editable .
+```
 
-- [ ] [Create](https://docs.gitlab.com/ee/user/project/repository/web_editor.html#create-a-file) or [upload](https://docs.gitlab.com/ee/user/project/repository/web_editor.html#upload-a-file) files
-- [ ] [Add files using the command line](https://docs.gitlab.com/ee/gitlab-basics/add-file.html#add-a-file-using-the-command-line) or push an existing Git repository with the following command:
+# Usage
+
+Command line arguments
+```
+usage: tt-burnin [-h] [-v] [--reset_file reset_config.json]
+```
+
+## Getting Help!
+
+Running tt-burnin with the ```-h, --help``` flag should bring up something that looks like this
 
 ```
-cd existing_repo
-git remote add origin https://yyz-gitlab.local.tenstorrent.com/syseng-platform/tt-burnin.git
-git branch -M main
-git push -uf origin main
+usage: tt-burnin [-h] [-v] [--reset_file reset_config.json]
+
+Tenstorrent Burnin (TT-Burnin) is a command line utility to run a high power consumption workload on TT devices.
+
+optional arguments:
+  -h, --help            show this help message and exit
+  -v, --version         show program's version number and exit
+  --reset_file reset_config.json
+                        Provide a custom reset json file for the host.Generate a default reset json file with the -g option with tt-smi.
 ```
 
-## Integrate with your tools
+## Running tt-burnin
 
-- [ ] [Set up project integrations](https://yyz-gitlab.local.tenstorrent.com/syseng-platform/tt-burnin/-/settings/integrations)
+After building run `tt-burnin` to run the program. 
 
-## Collaborate with your team
+TT-Burnin performs the following steps when running:
+1. Reset the boards on the host to get them into a known good state
+2. Start the power hungry workload on all boards
+3. Output a realtime telemetry command line widget to monitor the devices
+4. After user hits "enter" to stop the workload, another reset is performed to bring the boards back to known good state
 
-- [ ] [Invite team members and collaborators](https://docs.gitlab.com/ee/user/project/members/)
-- [ ] [Create a new merge request](https://docs.gitlab.com/ee/user/project/merge_requests/creating_merge_requests.html)
-- [ ] [Automatically close issues from merge requests](https://docs.gitlab.com/ee/user/project/issues/managing_issues.html#closing-issues-automatically)
-- [ ] [Enable merge request approvals](https://docs.gitlab.com/ee/user/project/merge_requests/approvals/)
-- [ ] [Set auto-merge](https://docs.gitlab.com/ee/user/project/merge_requests/merge_when_pipeline_succeeds.html)
+A full run of burnin should look like - 
 
-## Test and Deploy
+```
+$ tt-burnin
 
-Use the built-in continuous integration in GitLab.
+ Detected Chips: 3
+┏━━━━━━━━━━━━┳━━━━━━━━━━━━┳━━━━━━━━━━━━━━━┳━━━━━━━━━━━━━━━━━┳━━━━━━━━━━━━━━┓
+┃ Pci Dev ID ┃ Board Type ┃ Device Series ┃ Board Number    ┃ Coordinates  ┃
+┡━━━━━━━━━━━━╇━━━━━━━━━━━━╇━━━━━━━━━━━━━━━╇━━━━━━━━━━━━━━━━━╇━━━━━━━━━━━━━━┩
+│ 0          │ grayskull  │ e75           │ 100007311523010 │ N/A          │
+│ 1          │ wormhole   │ n300 L        │ 10001451170801d │ [0, 0, 0, 0] │
+│ N/A        │ wormhole   │ n300 R        │ 10001451170801d │ [1, 0, 0, 0] │
+└────────────┴────────────┴───────────────┴─────────────────┴──────────────┘
+ Resetting devices on host... 
+ Re-initializing boards after reset.... 
+ Detected Chips: 3
 
-- [ ] [Get started with GitLab CI/CD](https://docs.gitlab.com/ee/ci/quick_start/index.html)
-- [ ] [Analyze your code for known vulnerabilities with Static Application Security Testing(SAST)](https://docs.gitlab.com/ee/user/application_security/sast/)
-- [ ] [Deploy to Kubernetes, Amazon EC2, or Amazon ECS using Auto Deploy](https://docs.gitlab.com/ee/topics/autodevops/requirements.html)
-- [ ] [Use pull-based deployments for improved Kubernetes management](https://docs.gitlab.com/ee/user/clusters/agent/)
-- [ ] [Set up protected environments](https://docs.gitlab.com/ee/ci/environments/protected_environments.html)
+ Starting TT-Burnin workload on all boards. WARNING: Opening SMI might cause unexpected behavior 
+                                                                                                                                                               
+┏━━━━┳━━━━━━━━━━━━━━━━━━┳━━━━━━━━━━━━━━━━━━┳━━━━━━━━━━━━━┳━━━━━━━━━━━━━━━┳━━━━━━━━━━━━━━━━┓
+┃ ID ┃ Core Voltage (V) ┃ Core Current (A) ┃ AICLK (MHz) ┃ Power (W)     ┃ Core Temp (°C) ┃
+┡━━━━╇━━━━━━━━━━━━━━━━━━╇━━━━━━━━━━━━━━━━━━╇━━━━━━━━━━━━━╇━━━━━━━━━━━━━━━╇━━━━━━━━━━━━━━━━┩
+│ 0  │ 0.74 / 0.84      │  73.0 / 170.0    │  653 / 1000 │  54.0 /  56.0 │ 41.3 / 75.0    │
+│ 1  │ 0.75 / 0.95      │ 110.0 / 160.0    │  872 / 1000 │  84.0 /  85.0 │ 37.9 / 75.0    │
+│ 2  │ 0.75 / 0.95      │ 110.0 / 160.0    │  885 / 1000 │  85.0 /  85.0 │ 33.4 / 75.0    │
+└────┴──────────────────┴──────────────────┴─────────────┴───────────────┴────────────────┘
+ Press Enter to STOP TT-Burnin on all boards...
 
-***
+ Stopping TT-Burnin workload on all boards. 
 
-# Editing this README
-
-When you're ready to make this README your own, just edit this file and use the handy template below (or feel free to structure it however you want - this is just a starting point!). Thank you to [makeareadme.com](https://www.makeareadme.com/) for this template.
-
-## Suggestions for a good README
-Every project is different, so consider which of these sections apply to yours. The sections used in the template are suggestions for most open source projects. Also keep in mind that while a README can be too long and detailed, too long is better than too short. If you think your README is too long, consider utilizing another form of documentation rather than cutting out information.
-
-## Name
-Choose a self-explaining name for your project.
-
-## Description
-Let people know what your project can do specifically. Provide context and add a link to any reference visitors might be unfamiliar with. A list of Features or a Background subsection can also be added here. If there are alternatives to your project, this is a good place to list differentiating factors.
-
-## Badges
-On some READMEs, you may see small images that convey metadata, such as whether or not all the tests are passing for the project. You can use Shields to add some to your README. Many services also have instructions for adding a badge.
-
-## Visuals
-Depending on what you are making, it can be a good idea to include screenshots or even a video (you'll frequently see GIFs rather than actual videos). Tools like ttygif can help, but check out Asciinema for a more sophisticated method.
-
-## Installation
-Within a particular ecosystem, there may be a common way of installing things, such as using Yarn, NuGet, or Homebrew. However, consider the possibility that whoever is reading your README is a novice and would like more guidance. Listing specific steps helps remove ambiguity and gets people to using your project as quickly as possible. If it only runs in a specific context like a particular programming language version or operating system or has dependencies that have to be installed manually, also add a Requirements subsection.
-
-## Usage
-Use examples liberally, and show the expected output if you can. It's helpful to have inline the smallest example of usage that you can demonstrate, while providing links to more sophisticated examples if they are too long to reasonably include in the README.
-
-## Support
-Tell people where they can go to for help. It can be any combination of an issue tracker, a chat room, an email address, etc.
-
-## Roadmap
-If you have ideas for releases in the future, it is a good idea to list them in the README.
-
-## Contributing
-State if you are open to contributions and what your requirements are for accepting them.
-
-For people who want to make changes to your project, it's helpful to have some documentation on how to get started. Perhaps there is a script that they should run or some environment variables that they need to set. Make these steps explicit. These instructions could also be useful to your future self.
-
-You can also document commands to lint the code or run tests. These steps help to ensure high code quality and reduce the likelihood that the changes inadvertently break something. Having instructions for running tests is especially helpful if it requires external setup, such as starting a Selenium server for testing in a browser.
-
-## Authors and acknowledgment
-Show your appreciation to those who have contributed to the project.
+ Resetting devices on host... 
+ Re-initializing boards after reset.... 
+ Detected Chips: 3
+```
 
 ## License
-For open source projects, say how it is licensed.
 
-## Project status
-If you have run out of energy or time for your project, put a note at the top of the README saying that development has slowed down or stopped completely. Someone may choose to fork your project or volunteer to step in as a maintainer or owner, allowing your project to keep going. You can also make an explicit request for maintainers.
+Apache 2.0 - https://www.apache.org/licenses/LICENSE-2.0.txt
