@@ -54,13 +54,7 @@ include-package-data = true
 
 [tool.setuptools.package-data]
 "*" = [
-    ".ignored/version.txt",
-    "data/*/*.yaml"
-]
-
-[tools.setuptools.exclude-package-data]
-"*" = [
-  'build',
+    "ttx/*.ttx"
 ]
 
 [tool.setuptools.packages.find]

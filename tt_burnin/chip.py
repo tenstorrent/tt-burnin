@@ -240,6 +240,7 @@ class GsChip(TTChip):
 
     def get_tensix_locations(self):
         bad_row_bits = self.get_harvest_bits()
+        bad_row_bits = bad_row_bits << 1
 
         bad_physical_rows = self._int_to_bits(bad_row_bits)
 

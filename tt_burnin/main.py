@@ -8,6 +8,7 @@ from tt_burnin.chip import detect_chips, detect_local_chips, GsChip, WhChip
 from tt_burnin.load_ttx import load_ttx_file, TtxFile, CoreId
 
 import argparse
+from importlib.resources import path
 
 
 def start_burnin_gs(
@@ -28,13 +29,12 @@ def start_burnin_gs(
     # Go busy
     device.arc_msg(0x52)
 
-    load_ttx_file(
-        device,
-        TtxFile(
-            "/mnt/motor/syseng/ttx-bank/power-virus/single-core-conv.loop.pm_enabled.20act.0wght.ttx"
-        ),
-        {CoreId(0, 0): device.get_tensix_locations()},
-    )
+    with path("tt_burnin", "") as data_path:
+        load_ttx_file(
+            device,
+            TtxFile(str(data_path.joinpath("ttx/gspv.ttx"))),
+            {CoreId(0, 0): device.get_tensix_locations()},
+        )
 
     if keep_trisc_under_reset:
         soft_reset_value = (
@@ -80,13 +80,12 @@ def start_burnin_wh(
     # Go busy
     device.arc_msg(0x52)
 
-    load_ttx_file(
-        device,
-        TtxFile(
-            "/mnt/motor/syseng/ttx-bank/wh_B0/pv_workloads/build_pv_ssmodes_sync_v3_fp32acc_dcache_off/single-core-matrix-inf-loop-20act.80wght-lf8.ttx"
-        ),
-        {CoreId(0, 0): device.get_tensix_locations()},
-    )
+    with path("tt_burnin", "") as data_path:
+        load_ttx_file(
+            device,
+            TtxFile(str(data_path.joinpath("ttx/whpv.ttx"))),
+            {CoreId(0, 0): device.get_tensix_locations()},
+        )
 
     if keep_trisc_under_reset:
         soft_reset_value = (
