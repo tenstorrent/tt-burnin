@@ -134,7 +134,8 @@ def read_hex_image_chunks(f: IO[bytes]) -> Iterable[Tuple[int, bytes]]:
                 if len(buffer) > 0:
                     assert addr is not None
                     yield addr, buffer
-                addr = int(f"0x{line[1:].strip().decode()}", 0)
+                # Word addr, so multiply it by 4 to turn it into byte address
+                addr = int(f"0x{line[1:].strip().decode()}", 0) * 4
                 buffer = bytearray()
             else:
                 buffer.extend(
@@ -149,9 +150,7 @@ def read_hex_image_chunks(f: IO[bytes]) -> Iterable[Tuple[int, bytes]]:
 def load_hex(chip: Chip, cores: Optional[Collection[CoreId]], bin: IO[bytes]) -> None:
     for address, data in read_hex_image_chunks(bin):
         if cores is None:
-            for core in chip.get_tensix_locations():
-                chip.noc_write(0, *core, address, data)
-            # chip.noc_broadcast(0, address, data)
+            chip.noc_broadcast(0, address, data)
         else:
             for core in cores:
                 chip.noc_write(0, *core, address, data)

@@ -209,6 +209,7 @@ class WhChip(TTChip):
     def __repr__(self):
         return f"Wormhole[{self.interface_id}]"
 
+
 class RemoteWhChip(WhChip):
     def noc_broadcast(self, noc: int, addr: int, data: bytes):
         for core in self.get_tensix_locations():
@@ -217,6 +218,7 @@ class RemoteWhChip(WhChip):
     def noc_broadcast32(self, noc: int, addr: int, data: int):
         for core in self.get_tensix_locations():
             self.luwen_chip.noc_write32(noc, *core, addr, data)
+
 
 class GsChip(TTChip):
     def __init__(self, *args, **kwargs):
@@ -258,9 +260,6 @@ class GsChip(TTChip):
 
     def min_fw_version(self):
         return 0x1050000
-
-    def set_default_tlb(self, index: int):
-        self.luwen_chip.set_default_tlb(index)
 
     def __repr__(self):
         return f"Grayskull[{self.interface_id}]"
