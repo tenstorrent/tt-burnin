@@ -5,7 +5,10 @@
 # This will get the semantic version from the current pyproject package definition.
 
 from typing import Any
-import importlib.metadata
+try:
+    import importlib.metadata as importlib_metadata
+except ModuleNotFoundError:
+    import importlib_metadata
 from pathlib import Path
 
 __package_version = "unknown"
@@ -24,8 +27,8 @@ def __get_package_version() -> str:
     try:
         # Try to get the version of the current package if
         # it is running from a distribution.
-        __package_version = importlib.metadata.version("tt-burnin")
-    except importlib.metadata.PackageNotFoundError:
+        __package_version = importlib_metadata.version("tt-burnin")
+    except importlib_metadata.PackageNotFoundError:
         # Fall back on getting it from a local pyproject.toml.
         # This works in a development environment where the
         # package has not been installed from a distribution.
