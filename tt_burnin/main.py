@@ -33,7 +33,10 @@ from tt_tools_common.utils_common.tools_utils import (
 
 
 def start_burnin_gs(
-    device, keep_trisc_under_reset: bool = False, stagger_start: bool = False
+    device,
+    keep_trisc_under_reset: bool = False,
+    stagger_start: bool = False,
+    no_check: bool = False,
 ):
     BRISC_SOFT_RESET = 1 << 11
     TRISC_SOFT_RESETS = (1 << 12) | (1 << 13) | (1 << 14)
@@ -55,6 +58,7 @@ def start_burnin_gs(
             device,
             TtxFile(str(data_path.joinpath("ttx/gspv.ttx"))),
             {CoreId(0, 0): device.get_tensix_locations()},
+            no_check,
         )
 
     if keep_trisc_under_reset:
@@ -107,7 +111,10 @@ def stop_burnin_gs(device):
 
 
 def start_burnin_wh(
-    device, keep_trisc_under_reset: bool = False, stagger_start: bool = False
+    device,
+    keep_trisc_under_reset: bool = False,
+    stagger_start: bool = False,
+    no_check: bool = False,
 ):
     BRISC_SOFT_RESET = 1 << 11
     TRISC_SOFT_RESETS = (1 << 12) | (1 << 13) | (1 << 14)
@@ -130,6 +137,7 @@ def start_burnin_wh(
             device,
             TtxFile(str(data_path.joinpath("ttx/whpv.ttx"))),
             {CoreId(0, 0): device.get_tensix_locations()},
+            no_check,
         )
 
     if keep_trisc_under_reset:
@@ -177,6 +185,18 @@ def parse_args():
         ),
         dest="reset",
     )
+    parser.add_argument(
+        "--no-reset",
+        action="store_true",
+        default=False,
+        help="Don't issue a reset before or after burning (WARNING: This may cause burnin or your next workload to no longer function)",
+    )
+    parser.add_argument(
+        "--no-check",
+        action="store_true",
+        default=False,
+        help="Don't check tensix fw after loading (WARNING: if the workload was loaded incorrectly burnin may not run at maximum load)",
+    )
     # subparsers = parser.add_subparsers(title="command", dest="command", required=True)
     return parser.parse_args()
 
@@ -199,7 +219,8 @@ def main():
         else:
             raise ValueError("Did not recognize board")
     print_all_available_devices(devices)
-    reset_all_devices(devices, reset_filename=args.reset)
+    if not args.no_reset:
+        reset_all_devices(devices, reset_filename=args.reset)
 
     try:
         print()
@@ -210,9 +231,9 @@ def main():
         )
         for device in devs:
             if isinstance(device, GsChip):
-                start_burnin_gs(device)
+                start_burnin_gs(device, no_check=args.no_check)
             elif isinstance(device, WhChip):
-                start_burnin_wh(device)
+                start_burnin_wh(device, no_check=args.no_check)
             else:
                 raise NotImplementedError(f"Don't support {device}")
 
@@ -247,4 +268,5 @@ def main():
                 raise NotImplementedError(f"Don't support {device}")
 
         # Final reset to restore state
-        reset_all_devices(devices, reset_filename=args.reset)
+        if not args.no_reset:
+            reset_all_devices(devices, reset_filename=args.reset)
