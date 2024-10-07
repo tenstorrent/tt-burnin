@@ -230,6 +230,7 @@ def main():
             CMD_LINE_COLOR.ENDC,
         )
         for device in devs:
+            print(f"\tStarting on {device}")
             if isinstance(device, GsChip):
                 start_burnin_gs(device, no_check=args.no_check)
             elif isinstance(device, WhChip):
