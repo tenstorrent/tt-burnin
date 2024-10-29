@@ -29,7 +29,7 @@ from typing import (
 
 from yaml import safe_load
 
-from tt_burnin.chip import TTChip as Chip
+from tt_burnin.chip import BhChip, TTChip as Chip
 
 DEFAULT_TIMEOUT_CYCLES = 100_000
 

@@ -15,7 +15,7 @@ from rich.live import Live
 from rich.text import Text
 from rich.console import Group
 from importlib.resources import path
-from tt_burnin.chip import GsChip, WhChip, RemoteWhChip
+from tt_burnin.chip import GsChip, WhChip, RemoteWhChip, BhChip
 from tt_burnin.load_ttx import load_ttx_file, TtxFile, CoreId
 from tt_tools_common.ui_common.themes import CMD_LINE_COLOR
 from tt_burnin.utils import (
@@ -30,6 +30,30 @@ from tt_tools_common.utils_common.tools_utils import (
     get_board_type,
     detect_chips_with_callback,
 )
+
+
+def reset_all_devices(devices, reset_filename=None):
+    """Reset all devices"""
+    print(CMD_LINE_COLOR.BLUE, "Resetting devices on host...", CMD_LINE_COLOR.ENDC)
+    LOG_FOLDER = os.path.expanduser("~/.config/tenstorrent")
+    log_filename = f"{LOG_FOLDER}/reset_config.json"
+    # If input is just reset board
+    if not reset_filename:
+        log_filename = reset_filename
+    data = parse_reset_input(log_filename)
+    if data:
+        # reset using the json file
+        parsed_dict = mobo_reset_from_json(data)
+        pci_indices, reinit = pci_indices_from_json(parsed_dict)
+        if pci_indices:
+            pci_board_reset(pci_indices, reinit)
+    else:
+        # reset all boards
+        dev_ids = []
+        for device in devices:
+            if not device.is_remote():
+                dev_ids.append(device.get_pci_interface_id())
+        pci_board_reset(dev_ids, reinit=True)
 
 
 def start_burnin_gs(
@@ -66,30 +90,6 @@ def start_burnin_gs(
 
     # Take cores out of reset
     device.noc_broadcast32(0, 0xFFB121B0, soft_reset_value)
-
-
-def reset_all_devices(devices, reset_filename=None):
-    """Reset all devices"""
-    print(CMD_LINE_COLOR.BLUE, "Resetting devices on host...", CMD_LINE_COLOR.ENDC)
-    LOG_FOLDER = os.path.expanduser("~/.config/tenstorrent")
-    log_filename = f"{LOG_FOLDER}/reset_config.json"
-    # If input is just reset board
-    if not reset_filename:
-        log_filename = reset_filename
-    data = parse_reset_input(log_filename)
-    if data:
-        # reset using the json file
-        parsed_dict = mobo_reset_from_json(data)
-        pci_indices, reinit = pci_indices_from_json(parsed_dict)
-        if pci_indices:
-            pci_board_reset(pci_indices, reinit)
-    else:
-        # reset all boards
-        dev_ids = []
-        for device in devices:
-            if not device.is_remote():
-                dev_ids.append(device.get_pci_interface_id())
-        pci_board_reset(dev_ids, reinit=True)
 
 
 def stop_burnin_gs(device):
@@ -157,6 +157,48 @@ def stop_burnin_wh(device):
     )
 
 
+def start_burnin_bh(
+    device, keep_trisc_under_reset: bool = False, stagger_start: bool = False
+):
+    BRISC_SOFT_RESET = 1 << 11
+    TRISC_SOFT_RESETS = (1 << 12) | (1 << 13) | (1 << 14)
+    NCRISC_SOFT_RESET = 1 << 18
+    STAGGERED_START_ENABLE = (1 << 31) if stagger_start else 0
+
+    # Put tensix under soft reset
+    device.noc_broadcast32(
+        0, 0xFFB121B0, BRISC_SOFT_RESET | TRISC_SOFT_RESETS | NCRISC_SOFT_RESET
+    )
+
+    with path("tt_burnin", "") as data_path:
+        load_ttx_file(
+            device,
+            TtxFile(str(data_path.joinpath("ttx/bhpv.ttx"))),
+            {CoreId(0, 0): device.get_tensix_locations()},
+        )
+
+    if keep_trisc_under_reset:
+        soft_reset_value = (
+            NCRISC_SOFT_RESET | TRISC_SOFT_RESETS | STAGGERED_START_ENABLE
+        )
+    else:
+        soft_reset_value = NCRISC_SOFT_RESET | STAGGERED_START_ENABLE
+
+    # Take cores out of reset
+    device.noc_broadcast32(0, 0xFFB121B0, soft_reset_value)
+
+
+def stop_burnin_bh(device):
+    BRISC_SOFT_RESET = 1 << 11
+    TRISC_SOFT_RESETS = (1 << 12) | (1 << 13) | (1 << 14)
+    NCRISC_SOFT_RESET = 1 << 18
+
+    # Put tensix back under soft reset
+    device.noc_broadcast32(
+        0, 0xFFB121B0, BRISC_SOFT_RESET | TRISC_SOFT_RESETS | NCRISC_SOFT_RESET
+    )
+
+
 def parse_args():
     # Parse arguments
     parser = argparse.ArgumentParser(description=__doc__)
@@ -186,9 +228,10 @@ def main():
     os.environ["RUST_BACKTRACE"] = "full"
     # Allow non blocking read for accepting user input before stopping burnin
     os.set_blocking(sys.stdin.fileno(), False)
-    devices = detect_chips_with_callback()
+    all_devices = detect_chips_with_callback()
     devs = []
-    for device in devices:
+    devices = []
+    for device in all_devices:
         if device.as_gs() is not None:
             devs.append(GsChip(device.as_gs()))
         elif device.as_wh() is not None:
@@ -196,9 +239,12 @@ def main():
                 devs.append(RemoteWhChip(device.as_wh()))
             else:
                 devs.append(WhChip(device.as_wh()))
+        elif device.as_bh() is not None:
+            devs.append(BhChip(device.as_bh()))
         else:
             raise ValueError("Did not recognize board")
-    print_all_available_devices(devices)
+        devices.append(device)
+    print_all_available_devices(devs)
     reset_all_devices(devices, reset_filename=args.reset)
 
     try:
@@ -213,6 +259,8 @@ def main():
                 start_burnin_gs(device)
             elif isinstance(device, WhChip):
                 start_burnin_wh(device)
+            elif isinstance(device, BhChip):
+                start_burnin_bh(device)
             else:
                 raise NotImplementedError(f"Don't support {device}")
 
@@ -243,6 +291,8 @@ def main():
                 stop_burnin_gs(device)
             elif isinstance(device, WhChip):
                 stop_burnin_wh(device)
+            elif isinstance(device, BhChip):
+                stop_burnin_bh(device)
             else:
                 raise NotImplementedError(f"Don't support {device}")
 
