@@ -23,6 +23,11 @@ class TTChip:
 
         self.telmetry_cache = None
 
+        self.is_remote = False
+
+    @abstractmethod
+    def arch(self) -> str: ...
+
     def reinit(self, callback=None):
         self.luwen_chip = PciChip(self.interface_id)
         self.telmetry_cache = None
@@ -104,6 +109,10 @@ class TTChip:
     def board_type(self):
         return self.luwen_chip.pci_board_type()
 
+    def board_id(self):
+        telem = self.get_telemetry_unchanged()
+        return telem.board_id
+
     def noc_read(self, noc: int, x: int, y: int, addr: int, data: bytes):
         self.luwen_chip.noc_read(noc, x, y, addr, data)
 
@@ -149,10 +158,6 @@ class TTChip:
     def arc_msg(self, *args, **kwargs):
         return self.luwen_chip.arc_msg(*args, **kwargs)
 
-    @abstractmethod
-    def min_fw_version(self):
-        pass
-
     # Given non-negative integer x, return an iterable containing the bits set in x, in increasing order.
     def _int_to_bits(self, x):
         return list(filter(lambda b: x & (1 << b), range(x.bit_length())))
@@ -163,6 +168,67 @@ def reverse_mapping_list(l):
     for idx, val in enumerate(l):
         ret[val] = idx
     return ret
+
+
+class BhChip(TTChip):
+    def noc_coord_flip(self, coord: tuple[int, int]) -> tuple[int, int]:
+        return (self.GRID_SIZE_X - coord.x - 1, self.GRID_SIZE_Y - coord.y - 1)
+
+    # Physical rows & columns are defined in Blackhole - NOC Co-ordinates
+    def phys_to_noc(self, coord: tuple[int, int], noc_id: int) -> tuple[int, int]:
+        noc0 = (self.PHYS_X_TO_NOC_0_X[coord[0]], self.PHYS_Y_TO_NOC_0_y[coord[1]])
+        return noc0 if noc_id == 0 else self.noc_coord_flip(noc0)
+
+    def __init__(self, *args, **kwargs):
+        self.GRID_SIZE_X = 17
+        self.GRID_SIZE_Y = 12
+
+        self.NUM_TENSIX_X = 14
+        self.NUM_TENSIX_Y = 10
+
+        self.PHYS_X_TO_NOC_0_X = (
+            0,
+            1,
+            16,
+            2,
+            15,
+            3,
+            14,
+            4,
+            13,
+            5,
+            12,
+            6,
+            11,
+            7,
+            10,
+            8,
+            9,
+        )
+        self.PHYS_Y_TO_NOC_0_y = (0, 1, 11, 2, 10, 3, 9, 4, 8, 5, 7, 6)
+
+        super().__init__(*args, **kwargs)
+
+    def get_tensix_locations(self):
+        good_cores = []
+        for x in range(self.NUM_TENSIX_X):
+            for y in range(self.NUM_TENSIX_Y):
+                tensix_phys = (
+                    x + 1,
+                    y + 2,
+                )  # Physical location of tensix_with_l1[0][0]
+                good_cores.append(self.phys_to_noc(tensix_phys, 0))
+        return set(good_cores)
+
+    def coord(self):
+        coord = self.luwen_chip.get_local_coord()
+        return (coord.shelf_x, coord.shelf_y, coord.rack_x, coord.rack_y)
+
+    def arch(self):
+        return "Blackhole"
+
+    def __repr__(self):
+        return f"Blackhole[{self.interface_id}]"
 
 
 class WhChip(TTChip):
@@ -203,14 +269,23 @@ class WhChip(TTChip):
 
         return set(good_cores)
 
-    def min_fw_version(self):
-        return 0x2170000
+    def arch(self):
+        return "Wormhole"
 
     def __repr__(self):
         return f"Wormhole[{self.interface_id}]"
 
+    def coord(self):
+        coord = self.luwen_chip.get_local_coord()
+        return (coord.shelf_x, coord.shelf_y, coord.rack_x, coord.rack_y)
+
 
 class RemoteWhChip(WhChip):
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+
+        self.is_remote = True
+
     def noc_broadcast(self, noc: int, addr: int, data: bytes):
         for core in self.get_tensix_locations():
             self.luwen_chip.noc_write(noc, *core, addr, data)
@@ -259,8 +334,11 @@ class GsChip(TTChip):
 
         return set(good_cores)
 
-    def min_fw_version(self):
-        return 0x1050000
+    def coord(self):
+        return "N/A"
+
+    def arch(self):
+        return "Grayskull"
 
     def __repr__(self):
         return f"Grayskull[{self.interface_id}]"
@@ -322,6 +400,8 @@ def detect_local_chips(ignore_ethernet: bool = False) -> list[Union[GsChip, WhCh
             output.append(GsChip(device.as_gs()))
         elif device.as_wh() is not None:
             output.append(WhChip(device.as_wh()))
+        elif device.as_bh() is not None:
+            output.append(BhChip(device.as_bh()))
         else:
             raise ValueError("Did not recognize board")
 
@@ -338,6 +418,8 @@ def detect_chips(local_only: bool = False) -> list[Union[GsChip, WhChip]]:
                 output.append(RemoteWhChip(device.as_wh()))
             else:
                 output.append(WhChip(device.as_wh()))
+        elif device.as_bh() is not None:
+            output.append(BhChip(device.as_bh()))
         else:
             raise ValueError("Did not recognize board")
 

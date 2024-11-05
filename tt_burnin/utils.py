@@ -12,6 +12,7 @@ from rich.table import Table
 from rich import get_console
 from pyluwen import PciChip
 from tt_tools_common.ui_common.themes import CMD_LINE_COLOR
+from tt_tools_common.reset_common.bh_reset import BHChipReset
 from tt_tools_common.reset_common.wh_reset import WHChipReset
 from tt_tools_common.reset_common.gs_tensix_reset import GSTensixReset
 from tt_tools_common.reset_common.galaxy_reset import GalaxyReset
@@ -20,12 +21,15 @@ from tt_tools_common.utils_common.tools_utils import (
     get_board_type,
 )
 
+from tt_burnin.chip import RemoteWhChip, WhChip
+
 
 def pci_board_reset(list_of_boards: List[int], reinit=False):
     """Given a list of pci index's init the pci chip and call reset on it"""
 
     reset_wh_pci_idx = []
     reset_gs_devs = []
+    reset_bh_pci_idx = []
     for pci_idx in list_of_boards:
         try:
             chip = PciChip(pci_interface=pci_idx)
@@ -39,20 +43,21 @@ def pci_board_reset(list_of_boards: List[int], reinit=False):
             reset_wh_pci_idx.append(pci_idx)
         elif chip.as_gs():
             reset_gs_devs.append(chip)
+        elif chip.as_bh():
+            reset_bh_pci_idx.append(pci_idx)
         else:
-            print(
-                CMD_LINE_COLOR.RED,
-                "Unkown chip!!",
-                CMD_LINE_COLOR.ENDC,
-            )
+            print(f"{CMD_LINE_COLOR.RED}Unknown chip!!{CMD_LINE_COLOR.ENDC}")
             sys.exit(1)
 
     # reset wh devices with pci indices
-    if reset_wh_pci_idx:
+    if len(reset_wh_pci_idx) > 0:
         WHChipReset().full_lds_reset(pci_interfaces=reset_wh_pci_idx, silent=True)
 
+    if len(reset_bh_pci_idx) > 0:
+        BHChipReset().full_lds_reset(pci_interfaces=reset_bh_pci_idx, silent=True)
+
     # reset gs devices by creating a partially init backend
-    if reset_gs_devs:
+    if len(reset_gs_devs) > 0:
         for i, device in enumerate(reset_gs_devs):
             GSTensixReset(device).tensix_reset(silent=True)
 
@@ -156,21 +161,14 @@ def print_all_available_devices(devices):
     table.add_column("Board Number")
     table.add_column("Coordinates")
     for i, device in enumerate(devices):
+        chip = device.luwen_chip
         board_id = hex(device.board_id()).replace("0x", "")
         board_type = get_board_type(board_id)
-        device_series = "grayskull" if device.as_gs() else "wormhole"
-        pci_dev_id = device.get_pci_interface_id() if not device.is_remote() else "N/A"
-        if device.as_wh():
-            coords = [
-                device.as_wh().get_local_coord().shelf_x,
-                device.as_wh().get_local_coord().shelf_y,
-                device.as_wh().get_local_coord().rack_x,
-                device.as_wh().get_local_coord().rack_y,
-            ]
-        else:
-            coords = "N/A"
-        if device.as_wh():
-            suffix = " R" if device.is_remote() else " L"
+        device_series = device.arch()
+        pci_dev_id = device.interface_id if not device.is_remote else "N/A"
+        coords = device.coord()
+        if isinstance(chip, WhChip):
+            suffix = " R" if device.is_remote else " L"
             board_type = board_type + suffix
 
         table.add_row(
@@ -204,18 +202,16 @@ def generate_table(devices) -> Table:
 
     for i, dev in enumerate(devices):
         telem = jsons.dump(dev.get_telemetry())
-        current = int(hex(telem["smbus_tx_tdc"]), 16) & 0xFFFF
-        voltage = int(hex(telem["smbus_tx_vcore"]), 16) / 1000
-        aiclk = int(hex(telem["smbus_tx_aiclk"]), 16) & 0xFFFF
-        power = int(hex(telem["smbus_tx_tdp"]), 16) & 0xFFFF
-        asic_temperature = (
-            int(hex(telem["smbus_tx_asic_temperature"]), 16) & 0xFFFF
-        ) / 16
-        vdd_max = int(hex(telem["smbus_tx_vdd_limits"]), 16) >> 16
-        curr_limit = int(hex(telem["smbus_tx_tdc"]), 16) >> 16
-        aiclk_limit = int(hex(telem["smbus_tx_aiclk"]), 16) >> 16
-        pwr_limit = int(hex(telem["smbus_tx_tdp"]), 16) >> 16
-        thm_limit = int(hex(telem["smbus_tx_thm_limits"]), 16) & 0xFFFF
+        current = int(hex(telem["tdc"]), 16) & 0xFFFF
+        voltage = int(hex(telem["vcore"]), 16) / 1000
+        aiclk = int(hex(telem["aiclk"]), 16) & 0xFFFF
+        power = int(hex(telem["tdp"]), 16) & 0xFFFF
+        asic_temperature = (int(hex(telem["asic_temperature"]), 16) & 0xFFFF) / 16
+        vdd_max = int(hex(telem["vdd_limits"]), 16) >> 16
+        curr_limit = int(hex(telem["tdc"]), 16) >> 16
+        aiclk_limit = int(hex(telem["aiclk"]), 16) >> 16
+        pwr_limit = int(hex(telem["tdp"]), 16) >> 16
+        thm_limit = int(hex(telem["thm_limits"]), 16) & 0xFFFF
         table.add_row(
             f"{i}",
             f"{voltage:4.2f}[light_goldenrod1] / {vdd_max/1000:4.2f}",
