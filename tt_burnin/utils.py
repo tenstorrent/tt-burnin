@@ -187,9 +187,17 @@ def prefix_color_picker(current_value, max_value):
     else:
         return "[orange3]"
 
+def asic_temperature_parser(temp, dev):
+    """ASIC temperature is reported with different schema for BH vs other chips"""
+    if dev.as_bh():
+        # BH temp is reported as signed 16_16 integer that needs to be split into two 16 bit values
+        return (temp >> 16) + (temp & 0xFFFF) / 65536.0
+    else:
+        return (temp & 0xFFFF) / 16
+    
 
 def generate_table(devices) -> Table:
-    """Make a new table."""
+    """Make a table to display telemetry values."""
     table = Table(
         title=" ",
     )
@@ -206,7 +214,7 @@ def generate_table(devices) -> Table:
         voltage = int(hex(telem["vcore"]), 16) / 1000
         aiclk = int(hex(telem["aiclk"]), 16) & 0xFFFF
         power = int(hex(telem["tdp"]), 16) & 0xFFFF
-        asic_temperature = (int(hex(telem["asic_temperature"]), 16) & 0xFFFF) / 16
+        asic_temperature = asic_temperature_parser(int(hex(telem["asic_temperature"]), 16), dev)
         vdd_max = int(hex(telem["vdd_limits"]), 16) >> 16
         curr_limit = int(hex(telem["tdc"]), 16) >> 16
         aiclk_limit = int(hex(telem["aiclk"]), 16) >> 16
