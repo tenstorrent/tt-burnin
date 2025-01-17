@@ -24,14 +24,14 @@ classifiers = [
   "Programming Language :: Python :: 3 :: Only",
 ]
 dependencies = [
-  "pyluwen @ git+https://github.com/tenstorrent/luwen.git@v0.4.7#subdirectory=crates/pyluwen",
+  "pyluwen @ git+https://github.com/tenstorrent/luwen.git@v0.4.8#subdirectory=crates/pyluwen",
   "tomli == 2.0.1; python_version < '3.11'",
 
   # This is a hack to get around the lack of importlib-metadata pre 3.8.
   # Using the 1.4.0 version because 3.8 will be our msv until it is eol.
   "importlib-metadata == 4.11.3; python_version < '3.8'",
 
-  'tt_tools_common @ git+https://github.com/tenstorrent/tt-tools-common.git@v1.4.8',
+  'tt_tools_common @ git+https://github.com/tenstorrent/tt-tools-common.git@v1.4.10',
 ]
 
 optional-dependencies.dev = [
