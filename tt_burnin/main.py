@@ -61,6 +61,7 @@ def start_burnin_gs(
     keep_trisc_under_reset: bool = False,
     stagger_start: bool = False,
     no_check: bool = False,
+    idle: bool = False
 ):
     BRISC_SOFT_RESET = 1 << 11
     TRISC_SOFT_RESETS = (1 << 12) | (1 << 13) | (1 << 14)
@@ -77,13 +78,14 @@ def start_burnin_gs(
     # Go busy
     device.arc_msg(0x52)
 
-    with path("tt_burnin", "") as data_path:
-        load_ttx_file(
-            device,
-            TtxFile(str(data_path.joinpath("ttx/gspv.ttx"))),
-            {CoreId(0, 0): device.get_tensix_locations()},
-            no_check,
-        )
+    if not idle:
+        with path("tt_burnin", "") as data_path:
+            load_ttx_file(
+                device,
+                TtxFile(str(data_path.joinpath("ttx/gspv.ttx"))),
+                {CoreId(0, 0): device.get_tensix_locations()},
+                no_check,
+            )
 
     if keep_trisc_under_reset:
         soft_reset_value = (
@@ -115,6 +117,7 @@ def start_burnin_wh(
     keep_trisc_under_reset: bool = False,
     stagger_start: bool = False,
     no_check: bool = False,
+    idle: bool = False
 ):
     BRISC_SOFT_RESET = 1 << 11
     TRISC_SOFT_RESETS = (1 << 12) | (1 << 13) | (1 << 14)
@@ -132,13 +135,14 @@ def start_burnin_wh(
     # Go busy
     device.arc_msg(0x52)
 
-    with path("tt_burnin", "") as data_path:
-        load_ttx_file(
-            device,
-            TtxFile(str(data_path.joinpath("ttx/whpv.ttx"))),
-            {CoreId(0, 0): device.get_tensix_locations()},
-            no_check,
-        )
+    if not idle:
+        with path("tt_burnin", "") as data_path:
+            load_ttx_file(
+                device,
+                TtxFile(str(data_path.joinpath("ttx/whpv.ttx"))),
+                {CoreId(0, 0): device.get_tensix_locations()},
+                no_check,
+            )
 
     if keep_trisc_under_reset:
         soft_reset_value = (
@@ -170,6 +174,7 @@ def start_burnin_bh(
     keep_trisc_under_reset: bool = False, 
     stagger_start: bool = False, 
     no_check: bool = False,
+    idle: bool = False
 ):
     BRISC_SOFT_RESET = 1 << 11
     TRISC_SOFT_RESETS = (1 << 12) | (1 << 13) | (1 << 14)
@@ -184,13 +189,14 @@ def start_burnin_bh(
     # Go busy
     device.arc_msg(0x52)
 
-    with path("tt_burnin", "") as data_path:
-        load_ttx_file(
-            device,
-            TtxFile(str(data_path.joinpath("ttx/bhpv.ttx"))),
-            {CoreId(0, 0): device.get_tensix_locations()},
-            no_check
-        )
+    if not idle:
+        with path("tt_burnin", "") as data_path:
+            load_ttx_file(
+                device,
+                TtxFile(str(data_path.joinpath("ttx/bhpv.ttx"))),
+                {CoreId(0, 0): device.get_tensix_locations()},
+                no_check
+            )
 
     if keep_trisc_under_reset:
         soft_reset_value = (
@@ -249,6 +255,12 @@ def parse_args():
         default=False,
         help="Don't check tensix fw after loading (WARNING: if the workload was loaded incorrectly burnin may not run at maximum load)",
     )
+    parser.add_argument(
+        "--idle",
+        action="store_true",
+        default=False,
+        help="Don't load the power virus workload, just run the tensix idle",
+    )
     # subparsers = parser.add_subparsers(title="command", dest="command", required=True)
     return parser.parse_args()
 
@@ -288,11 +300,11 @@ def main():
         for device in devs:
             print(f"\tStarting on {device}")
             if isinstance(device, GsChip):
-                start_burnin_gs(device, no_check=args.no_check)
+                start_burnin_gs(device, no_check=args.no_check, idle=args.idle)
             elif isinstance(device, WhChip):
-                start_burnin_wh(device, no_check=args.no_check)
+                start_burnin_wh(device, no_check=args.no_check, idle=args.idle)
             elif isinstance(device, BhChip):
-                start_burnin_bh(device, no_check=args.no_check)
+                start_burnin_bh(device, no_check=args.no_check, idle=args.idle)
             else:
                 raise NotImplementedError(f"Don't support {device}")
 
