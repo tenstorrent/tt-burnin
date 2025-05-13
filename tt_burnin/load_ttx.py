@@ -178,7 +178,6 @@ def load_bin(chip: Chip, cores: Optional[Collection[CoreId]], bin: IO[bytes]) ->
             for core in cores:
                 chip.noc_write(0, *core, address, data)
 
-
 def check_bin(chip: Chip, cores: Optional[Collection[CoreId]], bin: IO[bytes]) -> None:
     for address, data in read_bin_image_chunks(bin):
         if cores is None:
@@ -190,8 +189,7 @@ def check_bin(chip: Chip, cores: Optional[Collection[CoreId]], bin: IO[bytes]) -
                 for b, d in zip(buffer, data):
                     assert (
                         b == d
-                    ), f"Failed to write to core {address} {core} ({b} != {d})"
-
+                    ), f"Failed to write to core {core} at address {address} ({b} != {d})"
 
 # core_mapping: use logical (source) to physical (target) mapping
 # Returns the physical cores that it loaded an image on to.

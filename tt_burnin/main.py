@@ -277,7 +277,10 @@ def main():
                     break
                 live.update(Group(generate_table(devices), text))
                 time.sleep(0.1)
-
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        print(e)
     finally:
         print()
         print(
