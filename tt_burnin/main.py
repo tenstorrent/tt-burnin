@@ -57,7 +57,11 @@ def reset_all_devices(devices, reset_filename=None):
 
 
 def start_burnin_gs(
-    device, keep_trisc_under_reset: bool = False, stagger_start: bool = False
+    device,
+    keep_trisc_under_reset: bool = False,
+    stagger_start: bool = False,
+    no_check: bool = False,
+    idle: bool = False
 ):
     BRISC_SOFT_RESET = 1 << 11
     TRISC_SOFT_RESETS = (1 << 12) | (1 << 13) | (1 << 14)
@@ -74,12 +78,14 @@ def start_burnin_gs(
     # Go busy
     device.arc_msg(0x52)
 
-    with path("tt_burnin", "") as data_path:
-        load_ttx_file(
-            device,
-            TtxFile(str(data_path.joinpath("ttx/gspv.ttx"))),
-            {CoreId(0, 0): device.get_tensix_locations()},
-        )
+    if not idle:
+        with path("tt_burnin", "") as data_path:
+            load_ttx_file(
+                device,
+                TtxFile(str(data_path.joinpath("ttx/gspv.ttx"))),
+                {CoreId(0, 0): device.get_tensix_locations()},
+                no_check,
+            )
 
     if keep_trisc_under_reset:
         soft_reset_value = (
@@ -107,7 +113,11 @@ def stop_burnin_gs(device):
 
 
 def start_burnin_wh(
-    device, keep_trisc_under_reset: bool = False, stagger_start: bool = False
+    device,
+    keep_trisc_under_reset: bool = False,
+    stagger_start: bool = False,
+    no_check: bool = False,
+    idle: bool = False
 ):
     BRISC_SOFT_RESET = 1 << 11
     TRISC_SOFT_RESETS = (1 << 12) | (1 << 13) | (1 << 14)
@@ -125,12 +135,14 @@ def start_burnin_wh(
     # Go busy
     device.arc_msg(0x52)
 
-    with path("tt_burnin", "") as data_path:
-        load_ttx_file(
-            device,
-            TtxFile(str(data_path.joinpath("ttx/whpv.ttx"))),
-            {CoreId(0, 0): device.get_tensix_locations()},
-        )
+    if not idle:
+        with path("tt_burnin", "") as data_path:
+            load_ttx_file(
+                device,
+                TtxFile(str(data_path.joinpath("ttx/whpv.ttx"))),
+                {CoreId(0, 0): device.get_tensix_locations()},
+                no_check,
+            )
 
     if keep_trisc_under_reset:
         soft_reset_value = (
@@ -158,7 +170,11 @@ def stop_burnin_wh(device):
 
 
 def start_burnin_bh(
-    device, keep_trisc_under_reset: bool = False, stagger_start: bool = False
+    device, 
+    keep_trisc_under_reset: bool = False, 
+    stagger_start: bool = False, 
+    no_check: bool = False,
+    idle: bool = False
 ):
     BRISC_SOFT_RESET = 1 << 11
     TRISC_SOFT_RESETS = (1 << 12) | (1 << 13) | (1 << 14)
@@ -170,12 +186,17 @@ def start_burnin_bh(
         0, 0xFFB121B0, BRISC_SOFT_RESET | TRISC_SOFT_RESETS | NCRISC_SOFT_RESET
     )
 
-    with path("tt_burnin", "") as data_path:
-        load_ttx_file(
-            device,
-            TtxFile(str(data_path.joinpath("ttx/bhpv.ttx"))),
-            {CoreId(0, 0): device.get_tensix_locations()},
-        )
+    # Go busy
+    device.arc_msg(0x52)
+
+    if not idle:
+        with path("tt_burnin", "") as data_path:
+            load_ttx_file(
+                device,
+                TtxFile(str(data_path.joinpath("ttx/bhpv.ttx"))),
+                {CoreId(0, 0): device.get_tensix_locations()},
+                no_check
+            )
 
     if keep_trisc_under_reset:
         soft_reset_value = (
@@ -192,6 +213,9 @@ def stop_burnin_bh(device):
     BRISC_SOFT_RESET = 1 << 11
     TRISC_SOFT_RESETS = (1 << 12) | (1 << 13) | (1 << 14)
     NCRISC_SOFT_RESET = 1 << 18
+
+    # Go idle
+    device.arc_msg(0x54)
 
     # Put tensix back under soft reset
     device.noc_broadcast32(
@@ -219,6 +243,24 @@ def parse_args():
         ),
         dest="reset",
     )
+    parser.add_argument(
+        "--no-reset",
+        action="store_true",
+        default=False,
+        help="Don't issue a reset before or after burning (WARNING: This may cause burnin or your next workload to no longer function)",
+    )
+    parser.add_argument(
+        "--no-check",
+        action="store_true",
+        default=False,
+        help="Don't check tensix fw after loading (WARNING: if the workload was loaded incorrectly burnin may not run at maximum load)",
+    )
+    parser.add_argument(
+        "--idle",
+        action="store_true",
+        default=False,
+        help="Don't load the power virus workload, just run the tensix idle",
+    )
     # subparsers = parser.add_subparsers(title="command", dest="command", required=True)
     return parser.parse_args()
 
@@ -245,7 +287,8 @@ def main():
             raise ValueError("Did not recognize board")
         devices.append(device)
     print_all_available_devices(devs)
-    reset_all_devices(devices, reset_filename=args.reset)
+    if not args.no_reset:
+        reset_all_devices(devices, reset_filename=args.reset)
 
     try:
         print()
@@ -255,12 +298,13 @@ def main():
             CMD_LINE_COLOR.ENDC,
         )
         for device in devs:
+            print(f"\tStarting on {device}")
             if isinstance(device, GsChip):
-                start_burnin_gs(device)
+                start_burnin_gs(device, no_check=args.no_check, idle=args.idle)
             elif isinstance(device, WhChip):
-                start_burnin_wh(device)
+                start_burnin_wh(device, no_check=args.no_check, idle=args.idle)
             elif isinstance(device, BhChip):
-                start_burnin_bh(device)
+                start_burnin_bh(device, no_check=args.no_check, idle=args.idle)
             else:
                 raise NotImplementedError(f"Don't support {device}")
 
@@ -277,7 +321,10 @@ def main():
                     break
                 live.update(Group(generate_table(devices), text))
                 time.sleep(0.1)
-
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        print(e)
     finally:
         print()
         print(
@@ -297,4 +344,5 @@ def main():
                 raise NotImplementedError(f"Don't support {device}")
 
         # Final reset to restore state
-        reset_all_devices(devices, reset_filename=args.reset)
+        if not args.no_reset:
+            reset_all_devices(devices, reset_filename=args.reset)

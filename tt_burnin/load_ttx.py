@@ -178,7 +178,6 @@ def load_bin(chip: Chip, cores: Optional[Collection[CoreId]], bin: IO[bytes]) ->
             for core in cores:
                 chip.noc_write(0, *core, address, data)
 
-
 def check_bin(chip: Chip, cores: Optional[Collection[CoreId]], bin: IO[bytes]) -> None:
     for address, data in read_bin_image_chunks(bin):
         if cores is None:
@@ -190,13 +189,15 @@ def check_bin(chip: Chip, cores: Optional[Collection[CoreId]], bin: IO[bytes]) -
                 for b, d in zip(buffer, data):
                     assert (
                         b == d
-                    ), f"Failed to write to core {address} {core} ({b} != {d})"
-
+                    ), f"Failed to write to core {core} at address {address} ({b} != {d})"
 
 # core_mapping: use logical (source) to physical (target) mapping
 # Returns the physical cores that it loaded an image on to.
 def load_ttx_file(
-    chip: Chip, ttx: TtxFile, core_mapping: Mapping[CoreId, Collection[CoreId]]
+    chip: Chip,
+    ttx: TtxFile,
+    core_mapping: Mapping[CoreId, Collection[CoreId]],
+    no_check: bool,
 ) -> AbstractSet[CoreId]:
     all_tensix_cores = set(CoreId(*c) for c in chip.get_tensix_locations())
 
@@ -269,7 +270,7 @@ def load_ttx_file(
         )
 
     def load_core(
-        load_core: CoreId, target_cores: Optional[Collection[CoreId]]
+        load_core: CoreId, target_cores: Optional[Collection[CoreId]], no_check: bool
     ) -> None:
         image_bin = f"{load_core}/image.bin"
         ckernels_bin = f"{load_core}/ckernels.bin"
@@ -279,27 +280,35 @@ def load_ttx_file(
 
         if image_hex in infolist:
             load_hex(chip, target_cores, ttx.open(infolist[image_hex], mode="r"))
-            check_hex(chip, target_cores, ttx.open(infolist[image_hex], mode="r"))
+            if not no_check:
+                check_hex(chip, target_cores, ttx.open(infolist[image_hex], mode="r"))
 
         if ckernels_hex in infolist:
             load_hex(chip, target_cores, ttx.open(infolist[ckernels_hex], mode="r"))
-            check_hex(chip, target_cores, ttx.open(infolist[ckernels_hex], mode="r"))
+            if not no_check:
+                check_hex(
+                    chip, target_cores, ttx.open(infolist[ckernels_hex], mode="r")
+                )
 
         if image_bin in infolist:
             load_bin(chip, target_cores, ttx.open(infolist[image_bin], mode="r"))
-            check_bin(chip, target_cores, ttx.open(infolist[image_bin], mode="r"))
+            if not no_check:
+                check_bin(chip, target_cores, ttx.open(infolist[image_bin], mode="r"))
 
         if ckernels_bin in infolist:
             load_bin(chip, target_cores, ttx.open(infolist[ckernels_bin], mode="r"))
-            check_bin(chip, target_cores, ttx.open(infolist[ckernels_bin], mode="r"))
+            if not no_check:
+                check_bin(
+                    chip, target_cores, ttx.open(infolist[ckernels_bin], mode="r")
+                )
 
     if broadcast:
-        load_core(CoreId(0, 0), None)
+        load_core(CoreId(0, 0), None, no_check)
         return all_tensix_cores
 
     else:
         for source_core in image_bins:
-            load_core(source_core, core_mapping[source_core])
+            load_core(source_core, core_mapping[source_core], no_check)
         return image_bins
 
 
