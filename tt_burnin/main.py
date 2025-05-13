@@ -170,6 +170,9 @@ def start_burnin_bh(
         0, 0xFFB121B0, BRISC_SOFT_RESET | TRISC_SOFT_RESETS | NCRISC_SOFT_RESET
     )
 
+    # Go busy
+    device.arc_msg(0x52)
+
     with path("tt_burnin", "") as data_path:
         load_ttx_file(
             device,
@@ -192,6 +195,9 @@ def stop_burnin_bh(device):
     BRISC_SOFT_RESET = 1 << 11
     TRISC_SOFT_RESETS = (1 << 12) | (1 << 13) | (1 << 14)
     NCRISC_SOFT_RESET = 1 << 18
+
+    # Go idle
+    device.arc_msg(0x54)
 
     # Put tensix back under soft reset
     device.noc_broadcast32(
