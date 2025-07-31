@@ -18,9 +18,12 @@ from tt_tools_common.reset_common.gs_tensix_reset import GSTensixReset
 from tt_tools_common.reset_common.galaxy_reset import GalaxyReset
 from tt_tools_common.utils_common.tools_utils import (
     detect_chips_with_callback,
-    get_board_type,
 )
-
+from pyluwen import (
+    detect_chips_fallible,
+    run_wh_ubb_ipmi_reset,
+    run_ubb_wait_for_driver_load
+)
 from tt_burnin.chip import RemoteWhChip, WhChip
 
 
@@ -180,6 +183,54 @@ def print_all_available_devices(devices):
         )
     console.print(table)
 
+def get_board_type(board_id: str) -> str:
+    """
+    Get board type from board ID string.
+    Ex:
+        Board ID: AA-BBBBB-C-D-EE-FF-XXX
+                   ^     ^ ^ ^  ^  ^   ^
+                   |     | | |  |  |   +- XXX
+                   |     | | |  |  +----- FF
+                   |     | | |  +-------- EE
+                   |     | | +----------- D
+                   |     | +------------- C = Revision
+                   |     +--------------- BBBBB = Unique Part Identifier (UPI)
+                   +--------------------- AA
+    """
+    serial_num = int(f"0x{board_id}", base=16)
+    upi = (serial_num >> 36) & 0xFFFFF
+
+    # Grayskull cards
+    if upi == 0x3:
+        return "e150"
+    elif upi == 0xA:
+        return "e300"
+    elif upi == 0x7:
+        return "e75"
+
+    # Wormhole cards
+    elif upi == 0x8:
+        return "nb_cb"
+    elif upi == 0xB:
+        return "wh_4u"
+    elif upi == 0x14:
+        return "n300"
+    elif upi == 0x18:
+        return "n150"
+    elif upi == 0x35:
+        return "tt-galaxy-wh"
+
+    # Blackhole cards
+    elif upi == 0x36:
+        return "bh-scrappy"
+    elif upi == 0x43:
+        return "p100a"
+    elif upi == 0x40:
+        return "p150a"
+    elif upi == 0x41:
+        return "p150b"
+    else:
+        return "N/A"
 
 def prefix_color_picker(current_value, max_value):
     if current_value < max_value * 0.85:
@@ -194,7 +245,54 @@ def asic_temperature_parser(temp, dev):
         return (temp >> 16) + (temp & 0xFFFF) / 65536.0
     else:
         return (temp & 0xFFFF) / 16
-    
+
+def timed_wait(seconds):
+    """Wait for a specified number of seconds, printing the progress."""
+    print("\033[93mWaiting for {} seconds: 0\033[0m".format(seconds), end='')
+    sys.stdout.flush()
+
+    for i in range(1, seconds + 1):
+        time.sleep(1)
+        # Move cursor back and overwrite the number
+        print("\r\033[93mWaiting for {} seconds: {}\033[0m".format(seconds, i), end='')
+        sys.stdout.flush()
+    print()
+
+def reset_6u_glx():
+    """Reset WH Galaxy trays and detect chips post reset."""
+    print(
+        CMD_LINE_COLOR.PURPLE,
+        f"Resetting WH Galaxy trays with reset command...",
+        CMD_LINE_COLOR.ENDC,
+    )
+    run_wh_ubb_ipmi_reset(ubb_num="0xF", dev_num="0xFF", op_mode="0x0", reset_time="0xF")
+    timed_wait(30)
+    run_ubb_wait_for_driver_load()
+    print(
+        CMD_LINE_COLOR.PURPLE,
+        f"Re-initializing boards after reset....",
+        CMD_LINE_COLOR.ENDC,
+    )
+    try:
+        devs = detect_chips_fallible(
+            local_only=True,
+            continue_on_failure=False,
+            callback=None,
+            noc_safe=True,
+        )
+        print(
+            CMD_LINE_COLOR.GREEN,
+            f"Re-initialized {len(devs)} chips after reset.",
+            CMD_LINE_COLOR.ENDC,
+        )
+    except Exception as e:
+        print(
+            CMD_LINE_COLOR.RED,
+            f"Error when re-initializing chips!\n {e}",
+            CMD_LINE_COLOR.ENDC,
+        )
+        # Error out if chips don't initalize
+    return
 
 def generate_table(devices) -> Table:
     """Make a table to display telemetry values."""
