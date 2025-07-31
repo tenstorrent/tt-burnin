@@ -52,7 +52,7 @@ class TTChip:
 
                     if block_count > 0:
                         print(f"\033[{block_count}A", end="", flush=True)
-                        print(f"\033[J", end="", flush=True)
+                        print("\033[J", end="", flush=True)
 
                     print(f"\rDetected Chips: {chip_count}\n", end="", flush=True)
                     block_count = 1
@@ -172,7 +172,7 @@ def reverse_mapping_list(l):
 
 class BhChip(TTChip):
     def noc_coord_flip(self, coord: tuple[int, int]) -> tuple[int, int]:
-        return (self.GRID_SIZE_X - coord.x - 1, self.GRID_SIZE_Y - coord.y - 1)
+        return (self.GRID_SIZE_X - coord[0] - 1, self.GRID_SIZE_Y - coord[1] - 1)
 
     # Physical rows & columns are defined in Blackhole - NOC Co-ordinates
     def phys_to_noc(self, coord: tuple[int, int], noc_id: int) -> tuple[int, int]:
@@ -186,38 +186,57 @@ class BhChip(TTChip):
         self.NUM_TENSIX_X = 14
         self.NUM_TENSIX_Y = 10
 
-        self.PHYS_X_TO_NOC_0_X = (
-            0,
-            1,
-            16,
-            2,
-            15,
-            3,
-            14,
-            4,
-            13,
-            5,
-            12,
-            6,
-            11,
-            7,
-            10,
-            8,
-            9,
-        )
-        self.PHYS_Y_TO_NOC_0_y = (0, 1, 11, 2, 10, 3, 9, 4, 8, 5, 7, 6)
+        self.TENSIX_LOCATIONS = []
+        for y in range(2, 12):
+            for x in range(1, 8):
+                self.TENSIX_LOCATIONS.append((x, y))
+            for x in range(10, 17):
+                self.TENSIX_LOCATIONS.append((x, y))
 
         super().__init__(*args, **kwargs)
 
+    @property
+    def noc_translation_enabled(self) -> bool:
+        telemetry = self.get_telemetry_unchanged()
+        return telemetry.noc_translation_enabled
+
+    @property
+    def enabled_tensix_columns(self) -> int:
+        telemetry = self.get_telemetry_unchanged()
+        return telemetry.tensix_enabled_col
+
     def get_tensix_locations(self):
-        good_cores = []
-        for x in range(self.NUM_TENSIX_X):
-            for y in range(self.NUM_TENSIX_Y):
-                tensix_phys = (
-                    x + 1,
-                    y + 2,
-                )  # Physical location of tensix_with_l1[0][0]
-                good_cores.append(self.phys_to_noc(tensix_phys, 0))
+        if self.noc_translation_enabled:
+            # When translated NOC 0 looks roughly the same as without translation
+            # with the minor difference that the harvested tensix are moved to the
+            # end (right side) of the grid
+            NUM_TENSIX_X = 0
+            enabled_tensix_columns_bitmask = self.enabled_tensix_columns
+            while enabled_tensix_columns_bitmask != 0:
+                if enabled_tensix_columns_bitmask & 0x1 != 0:
+                    NUM_TENSIX_X += 1
+                enabled_tensix_columns_bitmask >>= 1
+
+            good_cores = []
+            for core in self.TENSIX_LOCATIONS:
+                if (core[0] <= 7 and core[0] < NUM_TENSIX_X) or (core[0] >= 10 and (core[0] - 2) < NUM_TENSIX_X):
+                    good_cores.append(core)
+        else:
+            enabled_tensix_columns_bitmask = self.enabled_tensix_columns
+            enabled_tensix_columns = []
+            TENSIX_COLS = [1, 2, 3, 4, 5, 6, 7, 10, 11, 12, 13, 14, 15, 16]
+            for col in range(self.NUM_TENSIX_X):
+                if enabled_tensix_columns_bitmask & 0x1 == 1:
+                    enabled_tensix_columns.append(TENSIX_COLS[col])
+                enabled_tensix_columns_bitmask >>= 1
+
+            enabled_tensix_columns = set(enabled_tensix_columns)
+
+            good_cores = []
+            for core in self.TENSIX_LOCATIONS:
+                if core[0] in enabled_tensix_columns:
+                    good_cores.append(core)
+
         return set(good_cores)
 
     def coord(self):
