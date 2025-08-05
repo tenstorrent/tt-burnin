@@ -1,0 +1,33 @@
+Source: tt-burnin
+Section: utils
+Priority: optional
+Maintainer: Sam Bansal <sbansal@tenstorrent.com>
+Build-depends:
+ debhelper (>= 10),
+ dh-python,
+ pybuild-plugin-pyproject,
+ python3,
+ python3-setuptools,
+ python3-wheel,
+ python3-all,
+ python3-pip
+Standards-Version: 4.5.0
+Homepage: https://github.com/tenstorrent/tt-burnin
+Vcs-Git: https://github.com/tenstorrent/tt-burnin.git
+Vcs-Browser: https://github.com/tenstorrent/tt-burnin
+
+Package: tt-burnin
+Architecture: all
+Essential: no
+Depends:
+ ${misc:Depends},
+ ${python3:Depends},
+ python3-pyluwen,
+Description: Tenstorrent chip testing and burn-in utility
+ # tt-burnin
+ .
+ Tenstorrent Burnin (TT-Burnin) is a command line utility to run a high power consumption workload on TT devices.
+ .
+ ## Official Repository
+ [https://github.com/tenstorrent/tt-burnin](https://github.com/tenstorrent/tt-burnin)
+
