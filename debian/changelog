@@ -1,3 +1,13 @@
+tt-burnin (0.2.3) noble; urgency=medium
+
+  [ Samridhi ]
+  * Added 6u galaxy reset support
+
+  [ Tenstorrent Releases ]
+  * pyproject.toml- updating version to 0.2.3
+
+ -- Tenstorrent Releases <releases@tenstorrent.com>  Fri, 08 Aug 2025 15:36:22 +0000
+
 tt-burnin (0.2.2) noble; urgency=medium
 
   [ John 'Warthog9' Hawley ]
