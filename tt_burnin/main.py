@@ -10,6 +10,7 @@ import os
 import sys
 import time
 import argparse
+import threading
 import tt_burnin
 from rich.live import Live
 from rich.text import Text
@@ -25,9 +26,11 @@ from tt_burnin.utils import (
     pci_board_reset,
     print_all_available_devices,
     generate_table,
+    get_board_type,
+    reset_6u_glx,
+
 )
 from tt_tools_common.utils_common.tools_utils import (
-    get_board_type,
     detect_chips_with_callback,
 )
 
@@ -37,6 +40,21 @@ def reset_all_devices(devices, reset_filename=None):
     print(CMD_LINE_COLOR.BLUE, "Resetting devices on host...", CMD_LINE_COLOR.ENDC)
     LOG_FOLDER = os.path.expanduser("~/.config/tenstorrent")
     log_filename = f"{LOG_FOLDER}/reset_config.json"
+    if not devices:
+        print(
+            CMD_LINE_COLOR.RED,
+            "No devices detected. Exiting...",
+            CMD_LINE_COLOR.ENDC,
+        )
+        sys.exit(1)
+    # Check board type and reset accordingly
+    board_id = hex(devices[0].board_id()).replace("0x", "")
+    board_type = get_board_type(board_id)
+    if board_type == "tt-galaxy-wh":
+        # Perform a full galaxy reset and detect chips post reset
+        reset_6u_glx()
+        return
+
     # If input is just reset board
     if not reset_filename:
         log_filename = reset_filename
@@ -170,9 +188,9 @@ def stop_burnin_wh(device):
 
 
 def start_burnin_bh(
-    device, 
-    keep_trisc_under_reset: bool = False, 
-    stagger_start: bool = False, 
+    device,
+    keep_trisc_under_reset: bool = False,
+    stagger_start: bool = False,
     no_check: bool = False,
     idle: bool = False
 ):
@@ -297,16 +315,30 @@ def main():
             "Starting TT-Burnin workload on all boards. WARNING: Opening SMI might cause unexpected behavior",
             CMD_LINE_COLOR.ENDC,
         )
-        for device in devs:
-            print(f"\tStarting on {device}")
-            if isinstance(device, GsChip):
-                start_burnin_gs(device, no_check=args.no_check, idle=args.idle)
-            elif isinstance(device, WhChip):
-                start_burnin_wh(device, no_check=args.no_check, idle=args.idle)
-            elif isinstance(device, BhChip):
-                start_burnin_bh(device, no_check=args.no_check, idle=args.idle)
-            else:
-                raise NotImplementedError(f"Don't support {device}")
+        print()
+        def start_burnin(device, idx, total):
+                print(
+                    CMD_LINE_COLOR.PURPLE,
+                    f"Starting TT-Burnin workload on device {idx + 1}/{total}",
+                    CMD_LINE_COLOR.ENDC,
+                )
+                if isinstance(device, GsChip):
+                    start_burnin_gs(device)
+                elif isinstance(device, WhChip):
+                    start_burnin_wh(device)
+                elif isinstance(device, BhChip):
+                    start_burnin_bh(device)
+                else:
+                    raise NotImplementedError(f"Don't support {device}")
+
+        # Thread the start of burnin for faster speed
+        threads = []
+        for i, device in enumerate(devs):
+            t = threading.Thread(target=start_burnin, args=(device, i, len(devs)))
+            t.start()
+            threads.append(t)
+        for t in threads:
+            t.join()
 
         text = Text(
             " Press Enter to STOP TT-Burnin on all boards...", style="bold yellow"
@@ -333,7 +365,8 @@ def main():
             CMD_LINE_COLOR.ENDC,
         )
         print()
-        for device in devs:
+        # Thread the stop of burnin for faster speed
+        def stop_burnin(device):
             if isinstance(device, GsChip):
                 stop_burnin_gs(device)
             elif isinstance(device, WhChip):
@@ -342,6 +375,14 @@ def main():
                 stop_burnin_bh(device)
             else:
                 raise NotImplementedError(f"Don't support {device}")
+
+        stop_threads = []
+        for device in devs:
+            t = threading.Thread(target=stop_burnin, args=(device,))
+            t.start()
+            stop_threads.append(t)
+        for t in stop_threads:
+            t.join()
 
         # Final reset to restore state
         if not args.no_reset:
