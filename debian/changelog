@@ -1,3 +1,15 @@
+tt-burnin (0.2.4) noble; urgency=medium
+
+  [ John 'Warthog9' Hawley ]
+  * Fixing build process
+  * Chasing down that signing problem
+  * build-debian: Fixing number of commits counter
+
+  [ Tenstorrent Releases ]
+  * pyproject.toml- updating version to 0.2.4
+
+ -- Tenstorrent Releases <releases@tenstorrent.com>  Mon, 18 Aug 2025 23:07:23 +0000
+
 tt-burnin (0.2.3) noble; urgency=medium
 
   [ Samridhi ]
