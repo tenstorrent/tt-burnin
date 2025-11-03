@@ -13,11 +13,28 @@ from pyluwen import PciChip, Telemetry
 from pyluwen import detect_chips as luwen_detect_chips
 from pyluwen import detect_chips_fallible as luwen_detect_chips_fallible
 
+from tt_umd import (
+    TTDevice,
+    TelemetryTag,
+    ARCH,
+    wormhole,
+    SmBusArcTelemetryReader,
+    SocDescriptor,
+    CoreType,
+)
 
 class TTChip:
-    def __init__(self, chip: PciChip):
-        self.luwen_chip = chip
-        self.interface_id = chip.pci_interface_id()
+    def __init__(self, chip: Union[PciChip, TTDevice]):
+        self.use_umd = isinstance(chip, TTDevice)
+        if self.use_umd:
+            self.umd_device = chip
+            self.interface_id = chip.get_pci_device().get_device_num()
+            self.soc_desc = SocDescriptor(self.umd_device)
+            # For UMD: ethernet coordinates (set externally)
+            self.eth_coord = None
+        else:
+            self.luwen_chip = chip
+            self.interface_id = chip.pci_interface_id()
 
         self._harvesting_bits = None
 
@@ -29,53 +46,149 @@ class TTChip:
     def arch(self) -> str: ...
 
     def reinit(self, callback=None):
-        self.luwen_chip = PciChip(self.interface_id)
-        self.telmetry_cache = None
+        if self.use_umd:
+            self.umd_device = TTDevice.create(self.interface_id)
+            self.umd_device.init_tt_device()
+            self.telmetry_cache = None
+            self.soc_desc = SocDescriptor(self.umd_device)
+        else:
+            self.luwen_chip = PciChip(self.interface_id)
+            self.telmetry_cache = None
 
-        chip_count = 0
-        block_count = 0
-        last_draw = time.time()
+            chip_count = 0
+            block_count = 0
+            last_draw = time.time()
 
-        def chip_detect_callback(status):
-            nonlocal chip_count, last_draw, block_count
+            def chip_detect_callback(status):
+                nonlocal chip_count, last_draw, block_count
 
-            if status.new_chip():
-                chip_count += 1
-            elif status.correct_down():
-                chip_count -= 1
-            chip_count = max(chip_count, 0)
+                if status.new_chip():
+                    chip_count += 1
+                elif status.correct_down():
+                    chip_count -= 1
+                chip_count = max(chip_count, 0)
 
-            if sys.stdout.isatty():
-                current_time = time.time()
-                if current_time - last_draw > 0.1:
-                    last_draw = current_time
+                if sys.stdout.isatty():
+                    current_time = time.time()
+                    if current_time - last_draw > 0.1:
+                        last_draw = current_time
 
-                    if block_count > 0:
-                        print(f"\033[{block_count}A", end="", flush=True)
-                        print("\033[J", end="", flush=True)
+                        if block_count > 0:
+                            print(f"\033[{block_count}A", end="", flush=True)
+                            print("\033[J", end="", flush=True)
 
-                    print(f"\rDetected Chips: {chip_count}\n", end="", flush=True)
-                    block_count = 1
+                        print(f"\rDetected Chips: {chip_count}\n", end="", flush=True)
+                        block_count = 1
 
-                    status_string = status.status_string()
-                    if status_string is not None:
-                        for line in status_string.splitlines():
-                            block_count += 1
-                            print(f"\r{line}", flush=True)
+                        status_string = status.status_string()
+                        if status_string is not None:
+                            for line in status_string.splitlines():
+                                block_count += 1
+                                print(f"\r{line}", flush=True)
+                else:
+                    time.sleep(0.01)
+
+            self.luwen_chip.init(
+                callback=chip_detect_callback if callback is None else callback
+            )
+
+    def get_telemetry(self):
+        if self.use_umd:
+            # For UMD, return a telemetry-like object with the required fields
+            arch = self.umd_device.get_arch()
+            
+            # Create the appropriate telemetry reader based on architecture
+            if arch == ARCH.WORMHOLE_B0:
+                telem_reader = SmBusArcTelemetryReader(self.umd_device)
             else:
-                time.sleep(0.01)
-
-        self.luwen_chip.init(
-            callback=chip_detect_callback if callback is None else callback
-        )
-
-    def get_telemetry(self) -> Telemetry:
-        self.telmetry_cache = self.luwen_chip.get_telemetry()
-        return self.telmetry_cache
+                telem_reader = self.umd_device.get_arc_telemetry_reader()
+            
+            # Create a simple telemetry object with the fields we need
+            class UMDTelemetry:
+                def __init__(self, reader, arch, device):
+                    self.reader = reader
+                    self.arch = arch
+                    self.device = device
+                    # Initialize telemetry fields
+                    self.m3_app_fw_version = None
+                    self.arc1_fw_version = None
+                    self.arc0_fw_version = None
+                    self.asic_location = None
+                    self.fw_bundle_version = None
+                    self.board_id = None
+                    # Common telemetry fields used in utils.py
+                    self.tdc = None
+                    self.vcore = None
+                    self.aiclk = None
+                    self.tdp = None
+                    self.asic_temperature = None
+                    self.vdd_limits = None
+                    self.thm_limits = None
+                    
+                def get_field(self, tag):
+                    if self.reader.is_entry_available(tag):
+                        return self.reader.read_entry(tag)
+                    return None
+            
+            # Map telemetry fields based on architecture
+            if arch == ARCH.WORMHOLE_B0:
+                telem_obj = UMDTelemetry(telem_reader, arch, self.umd_device)
+                # Map wormhole-specific fields
+                telem_obj.m3_app_fw_version = telem_obj.get_field(wormhole.TelemetryTag.M3_APP_FW_VERSION)
+                telem_obj.arc1_fw_version = telem_obj.get_field(wormhole.TelemetryTag.ARC1_FW_VERSION)
+                telem_obj.arc0_fw_version = telem_obj.get_field(wormhole.TelemetryTag.ARC0_FW_VERSION)
+                telem_obj.asic_location = telem_obj.get_field(wormhole.TelemetryTag.ASIC_RO)
+                telem_obj.fw_bundle_version = telem_obj.get_field(wormhole.TelemetryTag.FW_BUNDLE_VERSION)
+                # Get board_id from telemetry tags
+                board_id_high = telem_obj.get_field(wormhole.TelemetryTag.BOARD_ID_HIGH)
+                board_id_low = telem_obj.get_field(wormhole.TelemetryTag.BOARD_ID_LOW)
+                if board_id_high is not None and board_id_low is not None:
+                    telem_obj.board_id = (board_id_high << 32) | board_id_low
+                else:
+                    # Fallback to device method
+                    telem_obj.board_id = self.umd_device.get_board_id()
+                # Common telemetry fields used in utils.py
+                telem_obj.tdc = telem_obj.get_field(wormhole.TelemetryTag.TDC)
+                telem_obj.vcore = telem_obj.get_field(wormhole.TelemetryTag.VCORE)
+                telem_obj.aiclk = telem_obj.get_field(wormhole.TelemetryTag.AICLK)
+                telem_obj.tdp = telem_obj.get_field(wormhole.TelemetryTag.TDP)
+                telem_obj.asic_temperature = telem_obj.get_field(wormhole.TelemetryTag.ASIC_TEMPERATURE)
+                telem_obj.vdd_limits = telem_obj.get_field(wormhole.TelemetryTag.VDD_LIMITS)
+                telem_obj.thm_limits = telem_obj.get_field(wormhole.TelemetryTag.THM_LIMITS)
+            else:
+                telem_obj = UMDTelemetry(telem_reader, arch, self.umd_device)
+                # Map universal fields
+                telem_obj.asic_location = telem_obj.get_field(TelemetryTag.HARVESTING_STATE)
+                telem_obj.fw_bundle_version = telem_obj.get_field(TelemetryTag.FLASH_BUNDLE_VERSION)
+                # Get board_id from telemetry tags
+                board_id_high = telem_obj.get_field(TelemetryTag.BOARD_ID_HIGH)
+                board_id_low = telem_obj.get_field(TelemetryTag.BOARD_ID_LOW)
+                if board_id_high is not None and board_id_low is not None:
+                    telem_obj.board_id = (board_id_high << 32) | board_id_low
+                else:
+                    # Fallback to device method
+                    telem_obj.board_id = self.umd_device.get_board_id()
+                # Common telemetry fields used in utils.py
+                telem_obj.tdc = telem_obj.get_field(TelemetryTag.TDC)
+                telem_obj.vcore = telem_obj.get_field(TelemetryTag.VCORE)
+                telem_obj.aiclk = telem_obj.get_field(TelemetryTag.AICLK)
+                telem_obj.tdp = telem_obj.get_field(TelemetryTag.TDP)
+                telem_obj.asic_temperature = telem_obj.get_field(TelemetryTag.ASIC_TEMPERATURE)
+                telem_obj.vdd_limits = telem_obj.get_field(TelemetryTag.VDD_LIMITS)
+                telem_obj.thm_limits = telem_obj.get_field(TelemetryTag.THM_LIMITS)
+                # Fields only available in new telemetry format
+                telem_obj.noc_translation_enabled = telem_obj.get_field(TelemetryTag.NOC_TRANSLATION)
+                telem_obj.tensix_enabled_col = telem_obj.get_field(TelemetryTag.ENABLED_TENSIX_COL)
+            
+            self.telmetry_cache = telem_obj
+            return self.telmetry_cache
+        else:
+            self.telmetry_cache = self.luwen_chip.get_telemetry()
+            return self.telmetry_cache
 
     def get_telemetry_unchanged(self) -> Telemetry:
         if self.telmetry_cache is None:
-            self.telmetry_cache = self.luwen_chip.get_telemetry()
+            self.get_telemetry()
 
         return self.telmetry_cache
 
@@ -107,29 +220,65 @@ class TTChip:
         return self.__vnum_to_version(telem.smbus_tx_arc0_fw_version)
 
     def board_type(self):
-        return self.luwen_chip.pci_board_type()
+        if self.use_umd:
+            return (self.umd_device.get_board_id() >> 36) & 0xFFFFF
+        else:
+            return self.luwen_chip.pci_board_type()
 
     def board_id(self):
         telem = self.get_telemetry_unchanged()
         return telem.board_id
 
     def noc_read(self, noc: int, x: int, y: int, addr: int, data: bytes):
-        self.luwen_chip.noc_read(noc, x, y, addr, data)
+        if self.use_umd:
+            if (noc != 0):
+                raise ValueError("UMD NOC must be 0")
+            read_data = self.umd_device.noc_read(x, y, addr, len(data))
+            data[:] = read_data
+        else:
+            self.luwen_chip.noc_read(noc, x, y, addr, data)
 
     def noc_read32(self, noc: int, x: int, y: int, addr: int):
-        return self.luwen_chip.noc_read32(noc, x, y, addr)
+        if self.use_umd:
+            if (noc != 0):
+                raise ValueError("UMD NOC must be 0")
+            return self.umd_device.noc_read32(x, y, addr)
+        else:
+            return self.luwen_chip.noc_read32(noc, x, y, addr)
 
     def noc_write(self, noc: int, x: int, y: int, addr: int, data: bytes):
-        self.luwen_chip.noc_write(noc, x, y, addr, data)
+        if self.use_umd:
+            if (noc != 0):
+                raise ValueError("UMD NOC must be 0")
+            self.umd_device.noc_write(x, y, addr, data)
+        else:
+            self.luwen_chip.noc_write(noc, x, y, addr, data)
 
     def noc_write32(self, noc: int, x: int, y: int, addr: int, data: int):
-        self.luwen_chip.noc_write32(noc, x, y, addr, data)
+        if self.use_umd:
+            if (noc != 0):
+                raise ValueError("UMD NOC must be 0")
+            self.umd_device.noc_write32(x, y, addr, data)
+        else:
+            self.luwen_chip.noc_write32(noc, x, y, addr, data)
 
     def noc_broadcast(self, noc: int, addr: int, data: bytes):
-        self.luwen_chip.noc_broadcast(noc, addr, data)
+        if self.use_umd:
+            if (noc != 0):
+                raise ValueError("UMD NOC must be 0")
+            for core in self.soc_desc.get_cores(CoreType.TENSIX):
+                self.umd_device.noc_write(core.x, core.y, addr, data)
+        else:
+            self.luwen_chip.noc_broadcast(noc, addr, data)
 
     def noc_broadcast32(self, noc: int, addr: int, data: int):
-        self.luwen_chip.noc_broadcast32(noc, addr, data)
+        if self.use_umd:
+            if (noc != 0):
+                raise ValueError("UMD NOC must be 0")
+            for core in self.soc_desc.get_cores(CoreType.TENSIX):
+                self.umd_device.noc_write32(core.x, core.y, addr, data)
+        else:
+            self.luwen_chip.noc_broadcast32(noc, addr, data)
 
     def axi_write32(self, addr: int, value: int):
         self.luwen_chip.axi_write32(addr, value)
@@ -146,17 +295,14 @@ class TTChip:
 
         return bytes(data)
 
-    def spi_write(self, addr: int, data: bytes):
-        self.luwen_chip.spi_write(addr, data)
-
-    def spi_read(self, addr: int, size: int) -> bytes:
-        data = bytearray(size)
-        self.luwen_chip.spi_read(addr, data)
-
-        return bytes(data)
-
     def arc_msg(self, *args, **kwargs):
-        return self.luwen_chip.arc_msg(*args, **kwargs)
+        if self.use_umd:
+            # UMD arc_msg returns a vector where first element is the exit code and the following are the results.
+            # To match the pyluwen format, we return [first result, exit code]
+            result = self.umd_device.arc_msg(*args, **kwargs)
+            return [result[1], result[0]]
+        else:
+            return self.luwen_chip.arc_msg(*args, **kwargs)
 
     # Given non-negative integer x, return an iterable containing the bits set in x, in increasing order.
     def _int_to_bits(self, x):
@@ -240,8 +386,13 @@ class BhChip(TTChip):
         return set(good_cores)
 
     def coord(self):
-        coord = self.luwen_chip.get_local_coord()
-        return (coord.shelf_x, coord.shelf_y, coord.rack_x, coord.rack_y)
+        if self.use_umd:
+            if self.eth_coord is None:
+                return "N/A"
+            return (self.eth_coord.x, self.eth_coord.y, self.eth_coord.rack, self.eth_coord.shelf)
+        else:
+            coord = self.luwen_chip.get_local_coord()
+            return (coord.shelf_x, coord.shelf_y, coord.rack_x, coord.rack_y)
 
     def arch(self):
         return "Blackhole"
@@ -295,8 +446,13 @@ class WhChip(TTChip):
         return f"Wormhole[{self.interface_id}]"
 
     def coord(self):
-        coord = self.luwen_chip.get_local_coord()
-        return (coord.shelf_x, coord.shelf_y, coord.rack_x, coord.rack_y)
+        if self.use_umd:
+            if self.eth_coord is None:
+                return "N/A"
+            return (self.eth_coord.x, self.eth_coord.y, self.eth_coord.rack, self.eth_coord.shelf)
+        else:
+            coord = self.luwen_chip.get_local_coord()
+            return (coord.shelf_x, coord.shelf_y, coord.rack_x, coord.rack_y)
 
 
 class RemoteWhChip(WhChip):
@@ -361,85 +517,3 @@ class GsChip(TTChip):
 
     def __repr__(self):
         return f"Grayskull[{self.interface_id}]"
-
-
-def detect_local_chips(ignore_ethernet: bool = False) -> list[Union[GsChip, WhChip]]:
-    """
-    This will create a chip which only gaurentees that you have communication with the chip.
-    """
-
-    chip_count = 0
-    block_count = 0
-    last_draw = time.time()
-
-    def chip_detect_callback(status):
-        nonlocal chip_count, last_draw, block_count
-
-        if status.new_chip():
-            chip_count += 1
-        elif status.correct_down():
-            chip_count -= 1
-        chip_count = max(chip_count, 0)
-
-        if sys.stdout.isatty():
-            current_time = time.time()
-            if current_time - last_draw > 0.1:
-                last_draw = current_time
-
-                if block_count > 0:
-                    print(f"\033[{block_count}A", end="", flush=True)
-                    print(f"\033[J", end="", flush=True)
-
-                print(f"\rDetected Chips: {chip_count}\n", end="", flush=True)
-                block_count = 1
-
-                status_string = status.status_string()
-                if status_string is not None:
-                    for line in status_string.splitlines():
-                        block_count += 1
-                        print(f"\r{line}", flush=True)
-        else:
-            time.sleep(0.01)
-
-    output = []
-    for device in luwen_detect_chips_fallible(
-        local_only=True,
-        continue_on_failure=False,
-        callback=chip_detect_callback,
-        noc_safe=ignore_ethernet,
-    ):
-        if not device.have_comms():
-            raise Exception(
-                f"Do not have communication with {device}, you should reset or remove this device from your system before continuing."
-            )
-
-        device = device.force_upgrade()
-
-        if device.as_gs() is not None:
-            output.append(GsChip(device.as_gs()))
-        elif device.as_wh() is not None:
-            output.append(WhChip(device.as_wh()))
-        elif device.as_bh() is not None:
-            output.append(BhChip(device.as_bh()))
-        else:
-            raise ValueError("Did not recognize board")
-
-    return output
-
-
-def detect_chips(local_only: bool = False) -> list[Union[GsChip, WhChip]]:
-    output = []
-    for device in luwen_detect_chips(local_only=local_only):
-        if device.as_gs() is not None:
-            output.append(GsChip(device.as_gs()))
-        elif device.as_wh() is not None:
-            if device.is_remote():
-                output.append(RemoteWhChip(device.as_wh()))
-            else:
-                output.append(WhChip(device.as_wh()))
-        elif device.as_bh() is not None:
-            output.append(BhChip(device.as_bh()))
-        else:
-            raise ValueError("Did not recognize board")
-
-    return output

@@ -34,8 +34,14 @@ from tt_tools_common.utils_common.tools_utils import (
     detect_chips_with_callback,
 )
 
+from tt_umd import (
+    TopologyDiscovery,
+    TTDevice,
+    create_remote_wormhole_tt_device,
+    ARCH,
+)
 
-def reset_all_devices(devices, reset_filename=None):
+def reset_all_devices(devices, reset_filename=None, use_umd=False):
     """Reset all devices"""
     print(CMD_LINE_COLOR.BLUE, "Resetting devices on host...", CMD_LINE_COLOR.ENDC)
     LOG_FOLDER = os.path.expanduser("~/.config/tenstorrent")
@@ -52,7 +58,7 @@ def reset_all_devices(devices, reset_filename=None):
     board_type = get_board_type(board_id)
     if board_type == "tt-galaxy-wh":
         # Perform a full galaxy reset and detect chips post reset
-        reset_6u_glx()
+        reset_6u_glx(use_umd=use_umd)
         return
 
     # If input is just reset board
@@ -64,14 +70,14 @@ def reset_all_devices(devices, reset_filename=None):
         parsed_dict = mobo_reset_from_json(data)
         pci_indices, reinit = pci_indices_from_json(parsed_dict)
         if pci_indices:
-            pci_board_reset(pci_indices, reinit)
+            pci_board_reset(pci_indices, reinit, use_umd=use_umd)
     else:
         # reset all boards
         dev_ids = []
         for device in devices:
-            if not device.is_remote():
-                dev_ids.append(device.get_pci_interface_id())
-        pci_board_reset(dev_ids, reinit=True)
+            if not device.is_remote:
+                dev_ids.append(device.interface_id)
+        pci_board_reset(dev_ids, reinit=True, use_umd=use_umd)
 
 
 def start_burnin_gs(
@@ -279,6 +285,13 @@ def parse_args():
         default=False,
         help="Don't load the power virus workload, just run the tensix idle",
     )
+    parser.add_argument(
+        "--use_umd",
+        default=False,
+        action="store_true",
+        help="Use UMD instead of Luwen driver.",
+    )
+    
     # subparsers = parser.add_subparsers(title="command", dest="command", required=True)
     return parser.parse_args()
 
@@ -288,25 +301,48 @@ def main():
     os.environ["RUST_BACKTRACE"] = "full"
     # Allow non blocking read for accepting user input before stopping burnin
     os.set_blocking(sys.stdin.fileno(), False)
-    all_devices = detect_chips_with_callback()
     devs = []
     devices = []
-    for device in all_devices:
-        if device.as_gs() is not None:
-            devs.append(GsChip(device.as_gs()))
-        elif device.as_wh() is not None:
-            if device.is_remote():
-                devs.append(RemoteWhChip(device.as_wh()))
+    if args.use_umd:
+        umd_cluster_descriptor = TopologyDiscovery.create_cluster_descriptor()
+        all_devices = umd_cluster_descriptor.get_chips_local_first(umd_cluster_descriptor.get_all_chips())
+        umd_devices_dict = {}
+        for chip in all_devices:
+            if umd_cluster_descriptor.is_chip_mmio_capable(chip):
+                pci_device_num = umd_cluster_descriptor.get_chips_with_mmio()[chip]
+                umd_devices_dict[chip] = TTDevice.create(pci_device_num)
+                umd_devices_dict[chip].init_tt_device()
+                if umd_devices_dict[chip].get_arch() == ARCH.WORMHOLE_B0:
+                    devs.append(WhChip(umd_devices_dict[chip]))
+                elif umd_devices_dict[chip].get_arch() == ARCH.BLACKHOLE:
+                    devs.append(BhChip(umd_devices_dict[chip]))
+                else:
+                    raise ValueError("Did not recognize board")
             else:
-                devs.append(WhChip(device.as_wh()))
-        elif device.as_bh() is not None:
-            devs.append(BhChip(device.as_bh()))
-        else:
-            raise ValueError("Did not recognize board")
-        devices.append(device)
+                closest_mmio = umd_cluster_descriptor.get_closest_mmio_capable_chip(chip)
+                umd_devices_dict[chip] = create_remote_wormhole_tt_device(umd_devices_dict[closest_mmio], umd_cluster_descriptor, chip)
+                umd_devices_dict[chip].init_tt_device()
+                devs.append(RemoteWhChip(umd_devices_dict[chip]))
+            devs[-1].eth_coord = umd_cluster_descriptor.get_chip_locations().get(chip, None)
+            devices.append(umd_devices_dict[chip])
+    else:
+        all_devices = detect_chips_with_callback()
+        for device in all_devices:
+            if device.as_gs() is not None:
+                devs.append(GsChip(device.as_gs()))
+            elif device.as_wh() is not None:
+                if device.is_remote():
+                    devs.append(RemoteWhChip(device.as_wh()))
+                else:
+                    devs.append(WhChip(device.as_wh()))
+            elif device.as_bh() is not None:
+                devs.append(BhChip(device.as_bh()))
+            else:
+                raise ValueError("Did not recognize board")
+            devices.append(device)
     print_all_available_devices(devs)
     if not args.no_reset:
-        reset_all_devices(devices, reset_filename=args.reset)
+        reset_all_devices(devs, reset_filename=args.reset, use_umd=args.use_umd)
 
     try:
         print()
@@ -345,13 +381,13 @@ def main():
         )
 
         # Create a live update for telemetry widget
-        with Live(Group(generate_table(devices), text), refresh_per_second=10) as live:
+        with Live(Group(generate_table(devs), text), refresh_per_second=10) as live:
             while True:
                 # Break if there is any user keypress
                 c = sys.stdin.read(1)
                 if len(c) > 0:
                     break
-                live.update(Group(generate_table(devices), text))
+                live.update(Group(generate_table(devs), text))
                 time.sleep(0.1)
     except Exception as e:
         import traceback
@@ -386,4 +422,4 @@ def main():
 
         # Final reset to restore state
         if not args.no_reset:
-            reset_all_devices(devices, reset_filename=args.reset)
+            reset_all_devices(devs, reset_filename=args.reset, use_umd=args.use_umd)
