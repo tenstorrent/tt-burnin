@@ -69,8 +69,8 @@ def reset_all_devices(devices, reset_filename=None):
         # reset all boards
         dev_ids = []
         for device in devices:
-            if not device.is_remote():
-                dev_ids.append(device.get_pci_interface_id())
+            if not device.is_remote:
+                dev_ids.append(device.interface_id)
         pci_board_reset(dev_ids, reinit=True)
 
 
@@ -306,7 +306,7 @@ def main():
         devices.append(device)
     print_all_available_devices(devs)
     if not args.no_reset:
-        reset_all_devices(devices, reset_filename=args.reset)
+        reset_all_devices(devs, reset_filename=args.reset)
 
     try:
         print()
@@ -345,13 +345,13 @@ def main():
         )
 
         # Create a live update for telemetry widget
-        with Live(Group(generate_table(devices), text), refresh_per_second=10) as live:
+        with Live(Group(generate_table(devs), text), refresh_per_second=10) as live:
             while True:
                 # Break if there is any user keypress
                 c = sys.stdin.read(1)
                 if len(c) > 0:
                     break
-                live.update(Group(generate_table(devices), text))
+                live.update(Group(generate_table(devs), text))
                 time.sleep(0.1)
     except Exception as e:
         import traceback
@@ -386,4 +386,4 @@ def main():
 
         # Final reset to restore state
         if not args.no_reset:
-            reset_all_devices(devices, reset_filename=args.reset)
+            reset_all_devices(devs, reset_filename=args.reset)

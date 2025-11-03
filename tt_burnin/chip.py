@@ -75,7 +75,7 @@ class TTChip:
 
     def get_telemetry_unchanged(self) -> Telemetry:
         if self.telmetry_cache is None:
-            self.telmetry_cache = self.luwen_chip.get_telemetry()
+            self.get_telemetry()
 
         return self.telmetry_cache
 

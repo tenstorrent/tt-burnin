@@ -24,7 +24,7 @@ from pyluwen import (
     run_wh_ubb_ipmi_reset,
     run_ubb_wait_for_driver_load
 )
-from tt_burnin.chip import RemoteWhChip, WhChip
+from tt_burnin.chip import RemoteWhChip, WhChip, BhChip
 
 
 def pci_board_reset(list_of_boards: List[int], reinit=False):
@@ -164,13 +164,12 @@ def print_all_available_devices(devices):
     table.add_column("Board Number")
     table.add_column("Coordinates")
     for i, device in enumerate(devices):
-        chip = device.luwen_chip
         board_id = hex(device.board_id()).replace("0x", "")
         board_type = get_board_type(board_id)
         device_series = device.arch()
         pci_dev_id = device.interface_id if not device.is_remote else "N/A"
         coords = device.coord()
-        if isinstance(chip, WhChip):
+        if isinstance(device, RemoteWhChip):
             suffix = " R" if device.is_remote else " L"
             board_type = board_type + suffix
 
@@ -240,7 +239,7 @@ def prefix_color_picker(current_value, max_value):
 
 def asic_temperature_parser(temp, dev):
     """ASIC temperature is reported with different schema for BH vs other chips"""
-    if dev.as_bh():
+    if isinstance(dev, BhChip):
         # BH temp is reported as signed 16_16 integer that needs to be split into two 16 bit values
         return (temp >> 16) + (temp & 0xFFFF) / 65536.0
     else:
