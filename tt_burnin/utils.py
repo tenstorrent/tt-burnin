@@ -25,39 +25,63 @@ from pyluwen import (
     run_ubb_wait_for_driver_load
 )
 from tt_burnin.chip import RemoteWhChip, WhChip, BhChip
+from tt_umd import (
+    WarmReset,
+    PCIDevice,
+    TopologyDiscovery,
+    TTDevice,
+    ARCH,
+)
 
 
-def pci_board_reset(list_of_boards: List[int], reinit=False):
+def pci_board_reset(list_of_boards: List[int], reinit=False, use_umd=False):
     """Given a list of pci index's init the pci chip and call reset on it"""
 
     reset_wh_pci_idx = []
     reset_gs_devs = []
     reset_bh_pci_idx = []
     for pci_idx in list_of_boards:
-        try:
-            chip = PciChip(pci_interface=pci_idx)
-        except Exception as e:
-            print(
-                CMD_LINE_COLOR.RED,
-                f"Error accessing board at pci index {pci_idx}! Use -ls to see all devices available to reset",
-                CMD_LINE_COLOR.ENDC,
-            )
-        if chip.as_wh():
-            reset_wh_pci_idx.append(pci_idx)
-        elif chip.as_gs():
-            reset_gs_devs.append(chip)
-        elif chip.as_bh():
-            reset_bh_pci_idx.append(pci_idx)
+        if use_umd:
+            chip = TTDevice.create(pci_idx)
+            chip.init_tt_device()
+            if chip.get_arch() == ARCH.WORMHOLE_B0:
+                reset_wh_pci_idx.append(pci_idx)
+            elif chip.get_arch() == ARCH.BLACKHOLE:
+                reset_bh_pci_idx.append(pci_idx)
+            else:
+                print(f"{CMD_LINE_COLOR.RED}Unknown chip!!{CMD_LINE_COLOR.ENDC}")
+                sys.exit(1)
         else:
-            print(f"{CMD_LINE_COLOR.RED}Unknown chip!!{CMD_LINE_COLOR.ENDC}")
-            sys.exit(1)
+            try:
+                chip = PciChip(pci_interface=pci_idx)
+            except Exception as e:
+                print(
+                    CMD_LINE_COLOR.RED,
+                    f"Error accessing board at pci index {pci_idx}! Use -ls to see all devices available to reset",
+                    CMD_LINE_COLOR.ENDC,
+                )
+            if chip.as_wh():
+                reset_wh_pci_idx.append(pci_idx)
+            elif chip.as_gs():
+                reset_gs_devs.append(chip)
+            elif chip.as_bh():
+                reset_bh_pci_idx.append(pci_idx)
+            else:
+                print(f"{CMD_LINE_COLOR.RED}Unknown chip!!{CMD_LINE_COLOR.ENDC}")
+                sys.exit(1)
 
     # reset wh devices with pci indices
     if len(reset_wh_pci_idx) > 0:
-        WHChipReset().full_lds_reset(pci_interfaces=reset_wh_pci_idx, silent=True)
+        if use_umd:
+            WarmReset.warm_reset(reset_wh_pci_idx)
+        else:
+            WHChipReset().full_lds_reset(pci_interfaces=reset_wh_pci_idx, silent=True)
 
     if len(reset_bh_pci_idx) > 0:
-        BHChipReset().full_lds_reset(pci_interfaces=reset_bh_pci_idx, silent=True)
+        if use_umd:
+            WarmReset.warm_reset(reset_bh_pci_idx)
+        else:
+            BHChipReset().full_lds_reset(pci_interfaces=reset_bh_pci_idx, silent=True)
 
     # reset gs devices by creating a partially init backend
     if len(reset_gs_devs) > 0:
@@ -74,7 +98,15 @@ def pci_board_reset(list_of_boards: List[int], reinit=False):
             CMD_LINE_COLOR.ENDC,
         )
         try:
-            chips = detect_chips_with_callback()
+            if use_umd:
+                cluster_descriptor = TopologyDiscovery.create_cluster_descriptor()
+                print(
+                    CMD_LINE_COLOR.GREEN,
+                    f"UMD reset completed successfully.",
+                    CMD_LINE_COLOR.ENDC,
+                )
+            else:
+                chips = detect_chips_with_callback()
         except Exception as e:
             print(
                 CMD_LINE_COLOR.RED,
@@ -257,31 +289,71 @@ def timed_wait(seconds):
         sys.stdout.flush()
     print()
 
-def reset_6u_glx():
+def umd_ubb_wait_for_driver_load():
+    """
+    Wait for the driver to reload for UMD, try 100 times.
+    Similar to luwen's ubb_wait_for_driver_load but uses PCIDevice.enumerate_devices.
+    """
+    attempts = 0
+    expected_chip_count = 32
+    
+    while attempts < 100:
+        device_count = 0
+        try:
+            devices = PCIDevice.enumerate_devices()
+            device_count = len(devices)
+            
+            if device_count == expected_chip_count:
+                print(f"Driver loaded with {device_count} devices")
+                return
+        except Exception as e:
+            # If enumerate_devices fails, continue waiting
+            pass
+        
+        print(f"Waiting for driver load ... {attempts} seconds (found {device_count} devices)")
+        time.sleep(1)
+        attempts += 1
+    
+    # If we reach here, the driver was not loaded
+    raise Exception(f"Driver not loaded with {expected_chip_count} devices after 100 seconds... giving up")
+
+def reset_6u_glx(use_umd=False):
     """Reset WH Galaxy trays and detect chips post reset."""
     print(
         CMD_LINE_COLOR.PURPLE,
         f"Resetting WH Galaxy trays with reset command...",
         CMD_LINE_COLOR.ENDC,
     )
-    run_wh_ubb_ipmi_reset(ubb_num="0xF", dev_num="0xFF", op_mode="0x0", reset_time="0xF")
-    timed_wait(30)
-    run_ubb_wait_for_driver_load()
+    
+    if use_umd:
+        # Note that ubb_warm_reset already has all the listed default options.
+        WarmReset.ubb_warm_reset()
+        timed_wait(30)
+        umd_ubb_wait_for_driver_load()
+    else:
+        run_wh_ubb_ipmi_reset(ubb_num="0xF", dev_num="0xFF", op_mode="0x0", reset_time="0xF")
+        timed_wait(30)
+        run_ubb_wait_for_driver_load()
+
     print(
         CMD_LINE_COLOR.PURPLE,
         f"Re-initializing boards after reset....",
         CMD_LINE_COLOR.ENDC,
     )
     try:
-        devs = detect_chips_fallible(
-            local_only=True,
-            continue_on_failure=False,
-            callback=None,
-            noc_safe=True,
-        )
+        if use_umd:
+            cluster_descriptor = TopologyDiscovery.create_cluster_descriptor()
+            num_devices = len(cluster_descriptor.get_all_chips())
+        else:
+            num_devices = len(detect_chips_fallible(
+                local_only=True,
+                continue_on_failure=False,
+                callback=None,
+                noc_safe=True,
+            ))
         print(
             CMD_LINE_COLOR.GREEN,
-            f"Re-initialized {len(devs)} chips after reset.",
+            f"Re-initialized {num_devices} chips after reset.",
             CMD_LINE_COLOR.ENDC,
         )
     except Exception as e:

@@ -35,7 +35,7 @@ from tt_tools_common.utils_common.tools_utils import (
 )
 
 
-def reset_all_devices(devices, reset_filename=None):
+def reset_all_devices(devices, reset_filename=None, use_umd=False):
     """Reset all devices"""
     print(CMD_LINE_COLOR.BLUE, "Resetting devices on host...", CMD_LINE_COLOR.ENDC)
     LOG_FOLDER = os.path.expanduser("~/.config/tenstorrent")
@@ -52,7 +52,7 @@ def reset_all_devices(devices, reset_filename=None):
     board_type = get_board_type(board_id)
     if board_type == "tt-galaxy-wh":
         # Perform a full galaxy reset and detect chips post reset
-        reset_6u_glx()
+        reset_6u_glx(use_umd=use_umd)
         return
 
     # If input is just reset board
@@ -64,14 +64,14 @@ def reset_all_devices(devices, reset_filename=None):
         parsed_dict = mobo_reset_from_json(data)
         pci_indices, reinit = pci_indices_from_json(parsed_dict)
         if pci_indices:
-            pci_board_reset(pci_indices, reinit)
+            pci_board_reset(pci_indices, reinit, use_umd=use_umd)
     else:
         # reset all boards
         dev_ids = []
         for device in devices:
             if not device.is_remote:
                 dev_ids.append(device.interface_id)
-        pci_board_reset(dev_ids, reinit=True)
+        pci_board_reset(dev_ids, reinit=True, use_umd=use_umd)
 
 
 def start_burnin_gs(
@@ -279,6 +279,13 @@ def parse_args():
         default=False,
         help="Don't load the power virus workload, just run the tensix idle",
     )
+    parser.add_argument(
+        "--use_umd",
+        default=False,
+        action="store_true",
+        help="Use UMD instead of Luwen driver.",
+    )
+    
     # subparsers = parser.add_subparsers(title="command", dest="command", required=True)
     return parser.parse_args()
 
@@ -306,7 +313,7 @@ def main():
         devices.append(device)
     print_all_available_devices(devs)
     if not args.no_reset:
-        reset_all_devices(devs, reset_filename=args.reset)
+        reset_all_devices(devs, reset_filename=args.reset, use_umd=args.use_umd)
 
     try:
         print()
@@ -386,4 +393,4 @@ def main():
 
         # Final reset to restore state
         if not args.no_reset:
-            reset_all_devices(devs, reset_filename=args.reset)
+            reset_all_devices(devs, reset_filename=args.reset, use_umd=args.use_umd)
