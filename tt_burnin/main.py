@@ -34,6 +34,12 @@ from tt_tools_common.utils_common.tools_utils import (
     detect_chips_with_callback,
 )
 
+from tt_umd import (
+    TopologyDiscovery,
+    TTDevice,
+    create_remote_wormhole_tt_device,
+    ARCH,
+)
 
 def reset_all_devices(devices, reset_filename=None, use_umd=False):
     """Reset all devices"""
@@ -295,22 +301,45 @@ def main():
     os.environ["RUST_BACKTRACE"] = "full"
     # Allow non blocking read for accepting user input before stopping burnin
     os.set_blocking(sys.stdin.fileno(), False)
-    all_devices = detect_chips_with_callback()
     devs = []
     devices = []
-    for device in all_devices:
-        if device.as_gs() is not None:
-            devs.append(GsChip(device.as_gs()))
-        elif device.as_wh() is not None:
-            if device.is_remote():
-                devs.append(RemoteWhChip(device.as_wh()))
+    if args.use_umd:
+        umd_cluster_descriptor = TopologyDiscovery.create_cluster_descriptor()
+        all_devices = umd_cluster_descriptor.get_chips_local_first(umd_cluster_descriptor.get_all_chips())
+        umd_devices_dict = {}
+        for chip in all_devices:
+            if umd_cluster_descriptor.is_chip_mmio_capable(chip):
+                pci_device_num = umd_cluster_descriptor.get_chips_with_mmio()[chip]
+                umd_devices_dict[chip] = TTDevice.create(pci_device_num)
+                umd_devices_dict[chip].init_tt_device()
+                if umd_devices_dict[chip].get_arch() == ARCH.WORMHOLE_B0:
+                    devs.append(WhChip(umd_devices_dict[chip]))
+                elif umd_devices_dict[chip].get_arch() == ARCH.BLACKHOLE:
+                    devs.append(BhChip(umd_devices_dict[chip]))
+                else:
+                    raise ValueError("Did not recognize board")
             else:
-                devs.append(WhChip(device.as_wh()))
-        elif device.as_bh() is not None:
-            devs.append(BhChip(device.as_bh()))
-        else:
-            raise ValueError("Did not recognize board")
-        devices.append(device)
+                closest_mmio = umd_cluster_descriptor.get_closest_mmio_capable_chip(chip)
+                umd_devices_dict[chip] = create_remote_wormhole_tt_device(umd_devices_dict[closest_mmio], umd_cluster_descriptor, chip)
+                umd_devices_dict[chip].init_tt_device()
+                devs.append(RemoteWhChip(umd_devices_dict[chip]))
+            devs[-1].eth_coord = umd_cluster_descriptor.get_chip_locations().get(chip, None)
+            devices.append(umd_devices_dict[chip])
+    else:
+        all_devices = detect_chips_with_callback()
+        for device in all_devices:
+            if device.as_gs() is not None:
+                devs.append(GsChip(device.as_gs()))
+            elif device.as_wh() is not None:
+                if device.is_remote():
+                    devs.append(RemoteWhChip(device.as_wh()))
+                else:
+                    devs.append(WhChip(device.as_wh()))
+            elif device.as_bh() is not None:
+                devs.append(BhChip(device.as_bh()))
+            else:
+                raise ValueError("Did not recognize board")
+            devices.append(device)
     print_all_available_devices(devs)
     if not args.no_reset:
         reset_all_devices(devs, reset_filename=args.reset, use_umd=args.use_umd)
