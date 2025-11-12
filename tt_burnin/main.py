@@ -282,12 +282,7 @@ def parse_args():
     # subparsers = parser.add_subparsers(title="command", dest="command", required=True)
     return parser.parse_args()
 
-
-def main():
-    args = parse_args()
-    os.environ["RUST_BACKTRACE"] = "full"
-    # Allow non blocking read for accepting user input before stopping burnin
-    os.set_blocking(sys.stdin.fileno(), False)
+def detect_and_group_devices():
     all_devices = detect_chips_with_callback()
     devs = []
     devices = []
@@ -304,10 +299,25 @@ def main():
         else:
             raise ValueError("Did not recognize board")
         devices.append(device)
+    return devs, devices
+
+def garbage_collect_all_devices(all_devices):
+    for device in all_devices:
+        del device
+
+def main():
+    args = parse_args()
+    os.environ["RUST_BACKTRACE"] = "full"
+    # Allow non blocking read for accepting user input before stopping burnin
+    os.set_blocking(sys.stdin.fileno(), False)
+    devs, devices = detect_and_group_devices()
     print_all_available_devices(devs)
     if not args.no_reset:
         reset_all_devices(devices, reset_filename=args.reset)
 
+    # Force garbage collection on the old devices and start with new device objects after reset
+    garbage_collect_all_devices(devices)
+    devs, devices = detect_and_group_devices()
     try:
         print()
         print(
@@ -387,3 +397,6 @@ def main():
         # Final reset to restore state
         if not args.no_reset:
             reset_all_devices(devices, reset_filename=args.reset)
+
+        # Force garbage collection on the old devices and start with new device objects after reset
+        garbage_collect_all_devices(devices)
