@@ -260,10 +260,10 @@ def timed_wait(seconds):
     print()
 
 def reset_6u_glx():
-    """Reset WH Galaxy trays and detect chips post reset."""
+    """Reset Galaxy trays and detect chips post reset."""
     print(
         CMD_LINE_COLOR.PURPLE,
-        f"Resetting WH Galaxy trays with reset command...",
+        f"Resetting Galaxy trays with reset command...",
         CMD_LINE_COLOR.ENDC,
     )
     run_wh_ubb_ipmi_reset(ubb_num="0xF", dev_num="0xFF", op_mode="0x0", reset_time="0xF")
