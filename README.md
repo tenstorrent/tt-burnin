@@ -102,6 +102,10 @@ $ tt-burnin
  Detected Chips: 3
 ```
 
+## Supported products
+
+tt-burnin can be used with Wormhole and Blackhole products. The last version that supported Grayskull products was [v0.2.5](https://github.com/tenstorrent/tt-burnin/releases/tag/v0.2.5).
+
 ## License
 
 Apache 2.0 - https://www.apache.org/licenses/LICENSE-2.0.txt

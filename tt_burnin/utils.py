@@ -14,7 +14,6 @@ from pyluwen import PciChip
 from tt_tools_common.ui_common.themes import CMD_LINE_COLOR
 from tt_tools_common.reset_common.bh_reset import BHChipReset
 from tt_tools_common.reset_common.wh_reset import WHChipReset
-from tt_tools_common.reset_common.gs_tensix_reset import GSTensixReset
 from tt_tools_common.reset_common.galaxy_reset import GalaxyReset
 from tt_tools_common.utils_common.tools_utils import (
     detect_chips_with_callback,
@@ -31,7 +30,6 @@ def pci_board_reset(list_of_boards: List[int], reinit=False):
     """Given a list of pci index's init the pci chip and call reset on it"""
 
     reset_wh_pci_idx = []
-    reset_gs_devs = []
     reset_bh_pci_idx = []
     for pci_idx in list_of_boards:
         try:
@@ -44,8 +42,6 @@ def pci_board_reset(list_of_boards: List[int], reinit=False):
             )
         if chip.as_wh():
             reset_wh_pci_idx.append(pci_idx)
-        elif chip.as_gs():
-            reset_gs_devs.append(chip)
         elif chip.as_bh():
             reset_bh_pci_idx.append(pci_idx)
         else:
@@ -58,11 +54,6 @@ def pci_board_reset(list_of_boards: List[int], reinit=False):
 
     if len(reset_bh_pci_idx) > 0:
         BHChipReset().full_lds_reset(pci_interfaces=reset_bh_pci_idx, silent=True)
-
-    # reset gs devices by creating a partially init backend
-    if len(reset_gs_devs) > 0:
-        for i, device in enumerate(reset_gs_devs):
-            GSTensixReset(device).tensix_reset(silent=True)
 
     if reinit:
         # Enable backtrace for debugging
@@ -88,8 +79,6 @@ def pci_indices_from_json(json_dict):
     """Parse pci_list from reset json"""
     pci_indices = []
     reinit = False
-    if "gs_tensix_reset" in json_dict.keys():
-        pci_indices.extend(json_dict["gs_tensix_reset"]["pci_index"])
     if "wh_link_reset" in json_dict.keys():
         pci_indices.extend(json_dict["wh_link_reset"]["pci_index"])
     if "re_init_devices" in json_dict.keys():
