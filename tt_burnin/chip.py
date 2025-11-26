@@ -314,56 +314,7 @@ class RemoteWhChip(WhChip):
             self.luwen_chip.noc_write32(noc, *core, addr, data)
 
 
-class GsChip(TTChip):
-    def __init__(self, *args, **kwargs):
-        self.GRID_SIZE_X = 13
-        self.GRID_SIZE_Y = 12
-        self.NUM_TENSIX_X = self.GRID_SIZE_X - 1
-        self.NUM_TENSIX_Y = self.GRID_SIZE_Y - 2
-
-        self.PHYS_X_TO_NOC_0_X = [0, 12, 1, 11, 2, 10, 3, 9, 4, 8, 5, 7, 6]
-        self.PHYS_Y_TO_NOC_0_Y = [0, 11, 1, 10, 2, 9, 3, 8, 4, 7, 5, 6]
-        self.PHYS_X_TO_NOC_1_X = [12, 0, 11, 1, 10, 2, 9, 3, 8, 4, 7, 5, 6]
-        self.PHYS_Y_TO_NOC_1_Y = [11, 0, 10, 1, 9, 2, 8, 3, 7, 4, 6, 5]
-        self.NOC_0_X_TO_PHYS_X = reverse_mapping_list(self.PHYS_X_TO_NOC_0_X)
-        self.NOC_0_Y_TO_PHYS_Y = reverse_mapping_list(self.PHYS_Y_TO_NOC_0_Y)
-        self.NOC_1_X_TO_PHYS_X = reverse_mapping_list(self.PHYS_X_TO_NOC_1_X)
-        self.NOC_1_Y_TO_PHYS_Y = reverse_mapping_list(self.PHYS_Y_TO_NOC_1_Y)
-
-        super().__init__(*args, **kwargs)
-
-    def get_tensix_locations(self):
-        bad_row_bits = self.get_harvest_bits()
-        bad_row_bits = bad_row_bits << 1
-
-        bad_physical_rows = self._int_to_bits(bad_row_bits)
-
-        disabled_rows = frozenset(
-            map(
-                lambda y: self.PHYS_Y_TO_NOC_0_Y[self.GRID_SIZE_Y - y - 1],
-                bad_physical_rows,
-            )
-        )
-        good_rows = filter(
-            lambda y: y not in disabled_rows, [1, 2, 3, 4, 5, 7, 8, 9, 10, 11]
-        )
-        good_cores = list(
-            itertools.product(list(range(1, self.GRID_SIZE_X)), good_rows)
-        )
-
-        return set(good_cores)
-
-    def coord(self):
-        return "N/A"
-
-    def arch(self):
-        return "Grayskull"
-
-    def __repr__(self):
-        return f"Grayskull[{self.interface_id}]"
-
-
-def detect_local_chips(ignore_ethernet: bool = False) -> list[Union[GsChip, WhChip]]:
+def detect_local_chips(ignore_ethernet: bool = False) -> list[Union[WhChip, BhChip]]:
     """
     This will create a chip which only gaurentees that you have communication with the chip.
     """
@@ -415,9 +366,7 @@ def detect_local_chips(ignore_ethernet: bool = False) -> list[Union[GsChip, WhCh
 
         device = device.force_upgrade()
 
-        if device.as_gs() is not None:
-            output.append(GsChip(device.as_gs()))
-        elif device.as_wh() is not None:
+        if device.as_wh() is not None:
             output.append(WhChip(device.as_wh()))
         elif device.as_bh() is not None:
             output.append(BhChip(device.as_bh()))
@@ -427,12 +376,10 @@ def detect_local_chips(ignore_ethernet: bool = False) -> list[Union[GsChip, WhCh
     return output
 
 
-def detect_chips(local_only: bool = False) -> list[Union[GsChip, WhChip]]:
+def detect_chips(local_only: bool = False) -> list[Union[WhChip, BhChip]]:
     output = []
     for device in luwen_detect_chips(local_only=local_only):
-        if device.as_gs() is not None:
-            output.append(GsChip(device.as_gs()))
-        elif device.as_wh() is not None:
+        if device.as_wh() is not None:
             if device.is_remote():
                 output.append(RemoteWhChip(device.as_wh()))
             else:

@@ -16,7 +16,7 @@ from rich.live import Live
 from rich.text import Text
 from rich.console import Group
 from importlib.resources import path
-from tt_burnin.chip import GsChip, WhChip, RemoteWhChip, BhChip
+from tt_burnin.chip import WhChip, RemoteWhChip, BhChip
 from tt_burnin.load_ttx import load_ttx_file, TtxFile, CoreId
 from tt_tools_common.ui_common.themes import CMD_LINE_COLOR
 from tt_burnin.utils import (
@@ -72,62 +72,6 @@ def reset_all_devices(devices, reset_filename=None):
             if not device.is_remote():
                 dev_ids.append(device.get_pci_interface_id())
         pci_board_reset(dev_ids, reinit=True)
-
-
-def start_burnin_gs(
-    device,
-    keep_trisc_under_reset: bool = False,
-    stagger_start: bool = False,
-    no_check: bool = False,
-    idle: bool = False
-):
-    BRISC_SOFT_RESET = 1 << 11
-    TRISC_SOFT_RESETS = (1 << 12) | (1 << 13) | (1 << 14)
-    NCRISC_SOFT_RESET = 1 << 18
-    STAGGERED_START_ENABLE = (1 << 31) if stagger_start else 0
-
-    device.noc_broadcast32(
-        0, 0xFFB121B0, BRISC_SOFT_RESET | TRISC_SOFT_RESETS | NCRISC_SOFT_RESET
-    )
-
-    # Deassert riscv reset
-    device.arc_msg(0xBA)
-
-    # Go busy
-    device.arc_msg(0x52)
-
-    if not idle:
-        with path("tt_burnin", "") as data_path:
-            load_ttx_file(
-                device,
-                TtxFile(str(data_path.joinpath("ttx/gspv.ttx"))),
-                {CoreId(0, 0): device.get_tensix_locations()},
-                no_check,
-            )
-
-    if keep_trisc_under_reset:
-        soft_reset_value = (
-            NCRISC_SOFT_RESET | TRISC_SOFT_RESETS | STAGGERED_START_ENABLE
-        )
-    else:
-        soft_reset_value = NCRISC_SOFT_RESET | STAGGERED_START_ENABLE
-
-    # Take cores out of reset
-    device.noc_broadcast32(0, 0xFFB121B0, soft_reset_value)
-
-
-def stop_burnin_gs(device):
-    BRISC_SOFT_RESET = 1 << 11
-    TRISC_SOFT_RESETS = (1 << 12) | (1 << 13) | (1 << 14)
-    NCRISC_SOFT_RESET = 1 << 18
-
-    # Go idle
-    device.arc_msg(0x54)
-
-    # Put tensix back under soft reset
-    device.noc_broadcast32(
-        0, 0xFFB121B0, BRISC_SOFT_RESET | TRISC_SOFT_RESETS | NCRISC_SOFT_RESET
-    )
 
 
 def start_burnin_wh(
@@ -287,9 +231,7 @@ def detect_and_group_devices():
     devs = []
     devices = []
     for device in all_devices:
-        if device.as_gs() is not None:
-            devs.append(GsChip(device.as_gs()))
-        elif device.as_wh() is not None:
+        if device.as_wh() is not None:
             if device.is_remote():
                 devs.append(RemoteWhChip(device.as_wh()))
             else:
@@ -332,9 +274,7 @@ def main():
                     f"Starting TT-Burnin workload on device {idx + 1}/{total}",
                     CMD_LINE_COLOR.ENDC,
                 )
-                if isinstance(device, GsChip):
-                    start_burnin_gs(device)
-                elif isinstance(device, WhChip):
+                if isinstance(device, WhChip):
                     start_burnin_wh(device)
                 elif isinstance(device, BhChip):
                     start_burnin_bh(device)
@@ -377,9 +317,7 @@ def main():
         print()
         # Thread the stop of burnin for faster speed
         def stop_burnin(device):
-            if isinstance(device, GsChip):
-                stop_burnin_gs(device)
-            elif isinstance(device, WhChip):
+            if isinstance(device, WhChip):
                 stop_burnin_wh(device)
             elif isinstance(device, BhChip):
                 stop_burnin_bh(device)
