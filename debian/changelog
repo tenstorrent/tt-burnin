@@ -1,3 +1,13 @@
+tt-burnin (0.2.7) noble; urgency=medium
+
+  [ Petra Alexson ]
+  * Bump pyluwen version to 0.7.15
+
+  [ Tenstorrent Releases ]
+  * pyproject.toml- updating version to 0.2.7
+
+ -- Tenstorrent Releases <releases@tenstorrent.com>  Thu, 27 Nov 2025 18:45:56 +0000
+
 tt-burnin (0.2.6) noble; urgency=medium
 
   [ Zakhary Kaplan ]
