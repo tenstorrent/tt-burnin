@@ -186,6 +186,8 @@ def get_board_type(board_id: str) -> str:
                    |     +--------------- BBBBB = Unique Part Identifier (UPI)
                    +--------------------- AA
     """
+    if board_id == "N/A":
+        return "N/A"
     serial_num = int(f"0x{board_id}", base=16)
     upi = (serial_num >> 36) & 0xFFFFF
 
@@ -218,6 +220,16 @@ def get_board_type(board_id: str) -> str:
         return "p150a"
     elif upi == 0x41:
         return "p150b"
+    elif upi == 0x42:
+        return "p150c"
+    elif upi == 0x44:
+        return "p300b"
+    elif upi == 0x45:
+        return "p300a"
+    elif upi == 0x46:
+        return "p300c"
+    elif upi == 0x47:
+        return "tt-galaxy-bh"
     else:
         return "N/A"
 
@@ -248,10 +260,10 @@ def timed_wait(seconds):
     print()
 
 def reset_6u_glx():
-    """Reset WH Galaxy trays and detect chips post reset."""
+    """Reset Galaxy trays and detect chips post reset."""
     print(
         CMD_LINE_COLOR.PURPLE,
-        f"Resetting WH Galaxy trays with reset command...",
+        f"Resetting Galaxy trays with reset command...",
         CMD_LINE_COLOR.ENDC,
     )
     run_wh_ubb_ipmi_reset(ubb_num="0xF", dev_num="0xFF", op_mode="0x0", reset_time="0xF")
