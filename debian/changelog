@@ -1,3 +1,15 @@
+tt-burnin (0.2.9) noble; urgency=medium
+
+  [ Petra Alexson ]
+  * Add support for new BH board types to get_board_type
+  * Use reset_6u_glx() function to reset BH Galaxy 6U systems
+  * Bump tt-tools-common to 1.4.33
+
+  [ Tenstorrent Releases ]
+  * pyproject.toml- updating version to 0.2.9
+
+ -- Tenstorrent Releases <releases@tenstorrent.com>  Mon, 08 Dec 2025 16:41:05 +0000
+
 tt-burnin (0.2.8) noble; urgency=medium
 
   [ Samridhi Bansal ]
