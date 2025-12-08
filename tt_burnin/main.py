@@ -50,7 +50,7 @@ def reset_all_devices(devices, reset_filename=None):
     # Check board type and reset accordingly
     board_id = hex(devices[0].board_id()).replace("0x", "")
     board_type = get_board_type(board_id)
-    if board_type == "tt-galaxy-wh":
+    if board_type == "tt-galaxy-wh" or board_type == "tt-galaxy-bh":
         # Perform a full galaxy reset and detect chips post reset
         reset_6u_glx()
         return
