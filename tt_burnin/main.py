@@ -30,6 +30,10 @@ from tt_burnin.utils import (
     reset_6u_glx,
 
 )
+from tt_tools_common.utils_common.system_utils import (
+    get_driver_version,
+    is_driver_version_at_least,
+)
 from tt_tools_common.utils_common.tools_utils import (
     detect_chips_with_callback,
 )
@@ -241,6 +245,19 @@ def detect_and_group_devices():
         else:
             raise ValueError("Did not recognize board")
         devices.append(device)
+
+        # Get driver version
+        driver = get_driver_version()
+        if not driver:
+            print(
+                CMD_LINE_COLOR.RED,
+                "No Tenstorrent driver detected! Please install driver using tt-kmd: https://github.com/tenstorrent/tt-kmd ",
+                CMD_LINE_COLOR.ENDC,
+            )
+            sys.exit(1)
+        # Raise power state to high
+        if is_driver_version_at_least(driver, "2.6.0"):
+            device.set_power_state("high")
     return devs, devices
 
 def garbage_collect_all_devices(all_devices):
