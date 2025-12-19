@@ -1,3 +1,18 @@
+tt-burnin (0.3.0) noble; urgency=medium
+
+  [ Zakhary Kaplan ]
+  * ci(release): specify version bump type
+  * build: bump required python version to 3.10
+  * build(deps): bump pyluwen to 0.8.0, tt-tools-common to 1.5
+
+  [ Petra Alexson ]
+  * Only use GO_BUSY/GO_IDLE power messages on BH if tt-kmd < v2.6.0
+
+  [ Tenstorrent Releases ]
+  * pyproject.toml- updating version to 0.3.0
+
+ -- Tenstorrent Releases <releases@tenstorrent.com>  Fri, 19 Dec 2025 20:38:56 +0000
+
 tt-burnin (0.2.9) noble; urgency=medium
 
   [ Petra Alexson ]
