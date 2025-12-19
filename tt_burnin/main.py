@@ -30,6 +30,10 @@ from tt_burnin.utils import (
     reset_6u_glx,
 
 )
+from tt_tools_common.utils_common.system_utils import (
+    get_driver_version,
+    is_driver_version_at_least,
+)
 from tt_tools_common.utils_common.tools_utils import (
     detect_chips_with_callback,
 )
@@ -148,8 +152,11 @@ def start_burnin_bh(
         0, 0xFFB121B0, BRISC_SOFT_RESET | TRISC_SOFT_RESETS | NCRISC_SOFT_RESET
     )
 
-    # Go busy
-    device.arc_msg(0x52)
+    # We only send GO_BUSY/GO_IDLE on BH if kmd < 2.6.0
+    driver = get_driver_version()
+    if not is_driver_version_at_least(driver, "2.6.0"):
+        # GO_BUSY message (power management interface prior to KMD v2.6.0, FW v18.12.0)
+        device.arc_msg(0x52)
 
     if not idle:
         with path("tt_burnin", "") as data_path:
@@ -176,8 +183,10 @@ def stop_burnin_bh(device):
     TRISC_SOFT_RESETS = (1 << 12) | (1 << 13) | (1 << 14)
     NCRISC_SOFT_RESET = 1 << 18
 
-    # Go idle
-    device.arc_msg(0x54)
+    # We only send GO_BUSY/GO_IDLE on BH if kmd < 2.6.0
+    driver = get_driver_version()
+    if not is_driver_version_at_least(driver, "2.6.0"):
+        device.arc_msg(0x54)
 
     # Put tensix back under soft reset
     device.noc_broadcast32(
@@ -241,6 +250,22 @@ def detect_and_group_devices():
         else:
             raise ValueError("Did not recognize board")
         devices.append(device)
+
+    driver = get_driver_version()
+    if is_driver_version_at_least(driver, "2.6.0"):
+        # Raise power state to high (BH)
+        try:
+            device.set_power_state("high")
+        except:
+            print(
+                CMD_LINE_COLOR.RED,
+                "Failed to set power state. Your firmware version might be too old.",
+                "Please update firmware to v18.12.0 or newer.",
+                "Or, if you know it's already up-to-date, please try power cycling.",
+                CMD_LINE_COLOR.ENDC,
+            )
+            sys.exit(1)
+
     return devs, devices
 
 def garbage_collect_all_devices(all_devices):
