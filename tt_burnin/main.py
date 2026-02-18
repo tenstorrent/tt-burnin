@@ -254,17 +254,18 @@ def detect_and_group_devices():
     driver = get_driver_version()
     if is_driver_version_at_least(driver, "2.6.0"):
         # Raise power state to high (BH)
-        try:
-            device.set_power_state("high")
-        except:
-            print(
-                CMD_LINE_COLOR.RED,
-                "Failed to set power state. Your firmware version might be too old.",
-                "Please update firmware to v18.12.0 or newer.",
-                "Or, if you know it's already up-to-date, please try power cycling.",
-                CMD_LINE_COLOR.ENDC,
-            )
-            sys.exit(1)
+        for device in devices:
+            try:
+                device.set_power_state("high")
+            except:
+                print(
+                    CMD_LINE_COLOR.RED,
+                    "Failed to set power state. Your firmware version might be too old.",
+                    "Please update firmware to v18.12.0 or newer.",
+                    "Or, if you know it's already up-to-date, please try power cycling.",
+                    CMD_LINE_COLOR.ENDC,
+                )
+                sys.exit(1)
 
     return devs, devices
 
