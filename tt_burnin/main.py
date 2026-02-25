@@ -275,7 +275,8 @@ def garbage_collect_all_devices(all_devices):
 
 def main():
     args = parse_args()
-    os.environ["RUST_BACKTRACE"] = "full"
+    # Uncomment the below to display a full Rust backtrace on error
+    # os.environ["RUST_BACKTRACE"] = "full"
     # Allow non blocking read for accepting user input before stopping burnin
     os.set_blocking(sys.stdin.fileno(), False)
     devs, devices = detect_and_group_devices()

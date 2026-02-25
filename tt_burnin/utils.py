@@ -56,9 +56,6 @@ def pci_board_reset(list_of_boards: List[int], reinit=False):
         BHChipReset().full_lds_reset(pci_interfaces=reset_bh_pci_idx, silent=True)
 
     if reinit:
-        # Enable backtrace for debugging
-        os.environ["RUST_BACKTRACE"] = "full"
-
         print(
             CMD_LINE_COLOR.PURPLE,
             f"Re-initializing boards after reset....",
