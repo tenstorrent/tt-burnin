@@ -1,3 +1,16 @@
+tt-burnin (0.4.0) noble; urgency=medium
+
+  [ James Growden ]
+  * send power ioctl to all devices
+
+  [ Petra Alexson ]
+  * Remove setting RUST_BACKTRACE to full
+
+  [ Tenstorrent Releases ]
+  * pyproject.toml- updating version to 0.4.0
+
+ -- Tenstorrent Releases <releases@tenstorrent.com>  Thu, 19 Mar 2026 16:30:24 +0000
+
 tt-burnin (0.3.0) noble; urgency=medium
 
   [ Zakhary Kaplan ]
