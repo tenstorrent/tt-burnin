@@ -312,9 +312,14 @@ def generate_table(devices) -> Table:
         power = int(hex(telem["tdp"]), 16) & 0xFFFF
         asic_temperature = asic_temperature_parser(int(hex(telem["asic_temperature"]), 16), dev)
         vdd_max = int(hex(telem["vdd_limits"]), 16) >> 16
-        curr_limit = int(hex(telem["tdc"]), 16) >> 16
-        aiclk_limit = int(hex(telem["aiclk"]), 16) >> 16
-        pwr_limit = int(hex(telem["tdp"]), 16) >> 16
+        if dev.as_bh():
+            curr_limit = int(hex(telem["tdc_limit_max"]), 16)
+            aiclk_limit = int(hex(telem["aiclk_limit_max"]), 16)
+            pwr_limit = int(hex(telem["tdp_limit_max"]), 16)
+        else:
+            curr_limit = int(hex(telem["tdc"]), 16) >> 16
+            aiclk_limit = int(hex(telem["aiclk"]), 16) >> 16
+            pwr_limit = int(hex(telem["tdp"]), 16) >> 16
         thm_limit = int(hex(telem["thm_limits"]), 16) & 0xFFFF
         table.add_row(
             f"{i}",
