@@ -26,6 +26,7 @@ classifiers = [
 dependencies = [
   'tt_tools_common~=1.5',
   'pyluwen~=0.8.0',
+  'tt_umd @ git+https://github.com/tenstorrent/tt-umd.git@brosko/more_py_api_again',
   "tomli == 2.0.1; python_version < '3.11'",
   "jsons == 1.6.3",
 
