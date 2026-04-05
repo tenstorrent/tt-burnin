@@ -21,7 +21,7 @@ class TTChip:
 
         self._harvesting_bits = None
 
-        self.telmetry_cache = None
+        self.telemetry_cache = None
 
         self.is_remote = False
 
@@ -29,14 +29,14 @@ class TTChip:
     def arch(self) -> str: ...
 
     def get_telemetry(self) -> Telemetry:
-        self.telmetry_cache = self.luwen_chip.get_telemetry()
-        return self.telmetry_cache
+        self.telemetry_cache = self.luwen_chip.get_telemetry()
+        return self.telemetry_cache
 
     def get_telemetry_unchanged(self) -> Telemetry:
-        if self.telmetry_cache is None:
-            self.telmetry_cache = self.luwen_chip.get_telemetry()
+        if self.telemetry_cache is None:
+            return self.get_telemetry()
 
-        return self.telmetry_cache
+        return self.telemetry_cache
 
     def get_harvest_bits(self) -> int:
         if self._harvesting_bits is None:
