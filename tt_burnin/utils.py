@@ -25,35 +25,52 @@ from pyluwen import (
 )
 from tt_burnin.chip import RemoteWhChip, WhChip
 
+from tt_umd import PCIDevice, WarmReset, TopologyDiscovery, TelemetryTag
 
-def pci_board_reset(list_of_boards: List[int], reinit=False):
+
+def pci_board_reset(list_of_boards: List[int], reinit=False, use_luwen: bool = False):
     """Given a list of pci index's init the pci chip and call reset on it"""
 
-    reset_wh_pci_idx = []
-    reset_bh_pci_idx = []
-    for pci_idx in list_of_boards:
-        try:
-            chip = PciChip(pci_interface=pci_idx)
-        except Exception as e:
-            print(
-                CMD_LINE_COLOR.RED,
-                f"Error accessing board at pci index {pci_idx}! Use -ls to see all devices available to reset",
-                CMD_LINE_COLOR.ENDC,
-            )
-        if chip.as_wh():
-            reset_wh_pci_idx.append(pci_idx)
-        elif chip.as_bh():
-            reset_bh_pci_idx.append(pci_idx)
-        else:
-            print(f"{CMD_LINE_COLOR.RED}Unknown chip!!{CMD_LINE_COLOR.ENDC}")
-            sys.exit(1)
+    if use_luwen:
+        reset_wh_pci_idx = []
+        reset_bh_pci_idx = []
+        for pci_idx in list_of_boards:
+            try:
+                chip = PciChip(pci_interface=pci_idx)
+            except Exception as e:
+                print(
+                    CMD_LINE_COLOR.RED,
+                    f"Error accessing board at pci index {pci_idx}! Use -ls to see all devices available to reset",
+                    CMD_LINE_COLOR.ENDC,
+                )
+            if chip.as_wh():
+                reset_wh_pci_idx.append(pci_idx)
+            elif chip.as_bh():
+                reset_bh_pci_idx.append(pci_idx)
+            else:
+                print(f"{CMD_LINE_COLOR.RED}Unknown chip!!{CMD_LINE_COLOR.ENDC}")
+                sys.exit(1)
 
-    # reset wh devices with pci indices
-    if len(reset_wh_pci_idx) > 0:
-        WHChipReset().full_lds_reset(pci_interfaces=reset_wh_pci_idx, silent=True)
+        # reset wh devices with pci indices
+        if len(reset_wh_pci_idx) > 0:
+            WHChipReset().full_lds_reset(pci_interfaces=reset_wh_pci_idx, silent=True)
 
-    if len(reset_bh_pci_idx) > 0:
-        BHChipReset().full_lds_reset(pci_interfaces=reset_bh_pci_idx, silent=True)
+        if len(reset_bh_pci_idx) > 0:
+            BHChipReset().full_lds_reset(pci_interfaces=reset_bh_pci_idx, silent=True)
+    else:
+        chips = PCIDevice.enumerate_devices_info()
+        reset_pci_idx = []
+        for pci_idx in list_of_boards:
+            if pci_idx not in chips:
+                print(
+                    CMD_LINE_COLOR.RED,
+                    f"Error accessing board at pci index {pci_idx}! Use -ls to see all devices available to reset",
+                    CMD_LINE_COLOR.ENDC,
+                )
+            else:
+                reset_pci_idx.append(pci_idx)
+        if len(reset_pci_idx) > 0:
+            WarmReset.warm_reset(reset_pci_idx)
 
     if reinit:
         print(
@@ -62,7 +79,10 @@ def pci_board_reset(list_of_boards: List[int], reinit=False):
             CMD_LINE_COLOR.ENDC,
         )
         try:
-            chips = detect_chips_with_callback()
+            if use_luwen:
+                _ = detect_chips_with_callback()
+            else:
+                _ = TopologyDiscovery.discover()
         except Exception as e:
             print(
                 CMD_LINE_COLOR.RED,
@@ -145,18 +165,17 @@ def print_all_available_devices(devices):
     console = get_console()
     table = Table()
     table.add_column("Pci Dev ID")
-    table.add_column("Board Type")
     table.add_column("Device Series")
+    table.add_column("Board Type")
     table.add_column("Board Number")
     table.add_column("Coordinates")
     for i, device in enumerate(devices):
-        chip = device.luwen_chip
         board_id = hex(device.board_id()).replace("0x", "")
         board_type = get_board_type(board_id)
         device_series = device.arch()
         pci_dev_id = device.interface_id if not device.is_remote else "N/A"
-        coords = device.coord()
-        if isinstance(chip, WhChip):
+        coords = device.eth_coord
+        if isinstance(device, WhChip):
             suffix = " R" if device.is_remote else " L"
             board_type = board_type + suffix
 
@@ -236,9 +255,9 @@ def prefix_color_picker(current_value, max_value):
     else:
         return "[orange3]"
 
-def asic_temperature_parser(temp, dev):
+def asic_temperature_parser(temp, dev, use_luwen: bool = False):
     """ASIC temperature is reported with different schema for BH vs other chips"""
-    if dev.as_bh():
+    if dev.as_bh() or not use_luwen:
         # BH temp is reported as signed 16_16 integer that needs to be split into two 16 bit values
         return (temp >> 16) + (temp & 0xFFFF) / 65536.0
     else:
@@ -292,7 +311,7 @@ def reset_6u_glx():
         # Error out if chips don't initalize
     return
 
-def generate_table(devices) -> Table:
+def generate_table(devices, use_luwen: bool = False) -> Table:
     """Make a table to display telemetry values."""
     table = Table(
         title=" ",
@@ -305,14 +324,29 @@ def generate_table(devices) -> Table:
     table.add_column("Core Temp (°C)")
 
     for i, dev in enumerate(devices):
-        telem = jsons.dump(dev.get_telemetry())
+        if use_luwen:
+            telem = jsons.dump(dev.get_telemetry())
+        else:
+            # Note that with UMD backend we use the new telemetry reader for both WH and BH, so the table ends up being the same for both architectures. With Luwen we use the old telemetry reader for BH and the new one for WH, so the table ends up being different between architectures.
+            tel_reader = dev.get_arc_telemetry_reader()
+            telem = {}
+            telem["tdc"] = tel_reader.read_entry(TelemetryTag.TDC)
+            telem["vcore"] = tel_reader.read_entry(TelemetryTag.VCORE)
+            telem["aiclk"] = tel_reader.read_entry(TelemetryTag.AICLK)
+            telem["tdp"] = tel_reader.read_entry(TelemetryTag.TDP)
+            telem["asic_temperature"] = tel_reader.read_entry(TelemetryTag.ASIC_TEMPERATURE)
+            telem["vdd_limits"] = tel_reader.read_entry(TelemetryTag.VDD_LIMITS)
+            telem["tdc_limit_max"] = tel_reader.read_entry(TelemetryTag.TDC_LIMIT_MAX)
+            telem["aiclk_limit_max"] = tel_reader.read_entry(TelemetryTag.AICLK_LIMIT_MAX)
+            telem["tdp_limit_max"] = tel_reader.read_entry(TelemetryTag.TDP_LIMIT_MAX)
+            telem["thm_limits"] = tel_reader.read_entry(TelemetryTag.THM_LIMIT_SHUTDOWN)
         current = int(hex(telem["tdc"]), 16) & 0xFFFF
         voltage = int(hex(telem["vcore"]), 16) / 1000
         aiclk = int(hex(telem["aiclk"]), 16) & 0xFFFF
         power = int(hex(telem["tdp"]), 16) & 0xFFFF
-        asic_temperature = asic_temperature_parser(int(hex(telem["asic_temperature"]), 16), dev)
+        asic_temperature = asic_temperature_parser(int(hex(telem["asic_temperature"]), 16), dev, use_luwen)
         vdd_max = int(hex(telem["vdd_limits"]), 16) >> 16
-        if dev.as_bh():
+        if dev.as_bh() or not use_luwen:
             curr_limit = int(hex(telem["tdc_limit_max"]), 16)
             aiclk_limit = int(hex(telem["aiclk_limit_max"]), 16)
             pwr_limit = int(hex(telem["tdp_limit_max"]), 16)
@@ -322,7 +356,7 @@ def generate_table(devices) -> Table:
             pwr_limit = int(hex(telem["tdp"]), 16) >> 16
         thm_limit = int(hex(telem["thm_limits"]), 16) & 0xFFFF
         table.add_row(
-            f"{i}",
+            f"{i} {'R' if dev.is_remote() else 'L'}",
             f"{voltage:4.2f}[light_goldenrod1] / {vdd_max/1000:4.2f}",
             f"{prefix_color_picker(current, curr_limit)}{current:5.1f}[light_goldenrod1] / {curr_limit:5.1f}",
             f"{prefix_color_picker(aiclk, aiclk_limit)}{aiclk:4.0f}[light_goldenrod1] / {aiclk_limit:4.0f}",
