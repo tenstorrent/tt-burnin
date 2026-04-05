@@ -28,47 +28,6 @@ class TTChip:
     @abstractmethod
     def arch(self) -> str: ...
 
-    def reinit(self, callback=None):
-        self.luwen_chip = PciChip(self.interface_id)
-        self.telmetry_cache = None
-
-        chip_count = 0
-        block_count = 0
-        last_draw = time.time()
-
-        def chip_detect_callback(status):
-            nonlocal chip_count, last_draw, block_count
-
-            if status.new_chip():
-                chip_count += 1
-            elif status.correct_down():
-                chip_count -= 1
-            chip_count = max(chip_count, 0)
-
-            if sys.stdout.isatty():
-                current_time = time.time()
-                if current_time - last_draw > 0.1:
-                    last_draw = current_time
-
-                    if block_count > 0:
-                        print(f"\033[{block_count}A", end="", flush=True)
-                        print("\033[J", end="", flush=True)
-
-                    print(f"\rDetected Chips: {chip_count}\n", end="", flush=True)
-                    block_count = 1
-
-                    status_string = status.status_string()
-                    if status_string is not None:
-                        for line in status_string.splitlines():
-                            block_count += 1
-                            print(f"\r{line}", flush=True)
-            else:
-                time.sleep(0.01)
-
-        self.luwen_chip.init(
-            callback=chip_detect_callback if callback is None else callback
-        )
-
     def get_telemetry(self) -> Telemetry:
         self.telmetry_cache = self.luwen_chip.get_telemetry()
         return self.telmetry_cache
@@ -94,18 +53,6 @@ class TTChip:
             version & 0xFF,
         )
 
-    def m3_fw_app_version(self):
-        telem = self.get_telemetry_unchanged()
-        return self.__vnum_to_version(telem.smbus_tx_m3_app_fw_version)
-
-    def smbus_fw_version(self):
-        telem = self.get_telemetry_unchanged()
-        return self.__vnum_to_version(telem.smbus_tx_arc1_fw_version)
-
-    def arc_l2_fw_version(self):
-        telem = self.get_telemetry_unchanged()
-        return self.__vnum_to_version(telem.smbus_tx_arc0_fw_version)
-
     def board_type(self):
         return self.luwen_chip.pci_board_type()
 
@@ -130,30 +77,6 @@ class TTChip:
 
     def noc_broadcast32(self, noc: int, addr: int, data: int):
         self.luwen_chip.noc_broadcast32(noc, addr, data)
-
-    def axi_write32(self, addr: int, value: int):
-        self.luwen_chip.axi_write32(addr, value)
-
-    def axi_write(self, addr: int, data: bytes):
-        self.luwen_chip.axi_write(addr, data)
-
-    def axi_read32(self, addr: int) -> int:
-        return self.luwen_chip.axi_read32(addr)
-
-    def axi_read(self, addr: int, size: int) -> bytes:
-        data = bytearray(size)
-        self.luwen_chip.axi_read(addr, data)
-
-        return bytes(data)
-
-    def spi_write(self, addr: int, data: bytes):
-        self.luwen_chip.spi_write(addr, data)
-
-    def spi_read(self, addr: int, size: int) -> bytes:
-        data = bytearray(size)
-        self.luwen_chip.spi_read(addr, data)
-
-        return bytes(data)
 
     def arc_msg(self, *args, **kwargs):
         return self.luwen_chip.arc_msg(*args, **kwargs)
