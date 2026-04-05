@@ -39,7 +39,7 @@ from tt_tools_common.utils_common.tools_utils import (
 )
 
 
-def reset_all_devices(devices, reset_filename=None):
+def reset_all_devices(devices, reset_filename=None, use_luwen: bool = False):
     """Reset all devices"""
     print(CMD_LINE_COLOR.BLUE, "Resetting devices on host...", CMD_LINE_COLOR.ENDC)
     LOG_FOLDER = os.path.expanduser("~/.config/tenstorrent")
@@ -68,14 +68,14 @@ def reset_all_devices(devices, reset_filename=None):
         parsed_dict = mobo_reset_from_json(data)
         pci_indices, reinit = pci_indices_from_json(parsed_dict)
         if pci_indices:
-            pci_board_reset(pci_indices, reinit)
+            pci_board_reset(pci_indices, reinit, use_luwen=use_luwen)
     else:
         # reset all boards
         dev_ids = []
         for device in devices:
             if not device.is_remote():
                 dev_ids.append(device.get_pci_interface_id())
-        pci_board_reset(dev_ids, reinit=True)
+        pci_board_reset(dev_ids, reinit=True, use_luwen=use_luwen)
 
 
 def start_burnin_wh(
@@ -232,6 +232,12 @@ def parse_args():
         default=False,
         help="Don't load the power virus workload, just run the tensix idle",
     )
+    parser.add_argument(
+        "--use_luwen",
+        default=False,
+        action="store_true",
+        help="Use deprecated Luwen driver instead of UMD (default).",
+    )
     # subparsers = parser.add_subparsers(title="command", dest="command", required=True)
     return parser.parse_args()
 
@@ -282,7 +288,7 @@ def main():
     devs, devices = detect_and_group_devices()
     print_all_available_devices(devs)
     if not args.no_reset:
-        reset_all_devices(devices, reset_filename=args.reset)
+        reset_all_devices(devices, reset_filename=args.reset, use_luwen=args.use_luwen)
 
     # Force garbage collection on the old devices and start with new device objects after reset
     garbage_collect_all_devices(devices)
@@ -361,7 +367,7 @@ def main():
 
         # Final reset to restore state
         if not args.no_reset:
-            reset_all_devices(devices, reset_filename=args.reset)
+            reset_all_devices(devices, reset_filename=args.reset, use_luwen=args.use_luwen)
 
         # Force garbage collection on the old devices and start with new device objects after reset
         garbage_collect_all_devices(devices)

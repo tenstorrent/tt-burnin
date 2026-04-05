@@ -25,35 +25,52 @@ from pyluwen import (
 )
 from tt_burnin.chip import RemoteWhChip, WhChip
 
+from tt_umd import PCIDevice, WarmReset, TopologyDiscovery
 
-def pci_board_reset(list_of_boards: List[int], reinit=False):
+
+def pci_board_reset(list_of_boards: List[int], reinit=False, use_luwen: bool = False):
     """Given a list of pci index's init the pci chip and call reset on it"""
 
-    reset_wh_pci_idx = []
-    reset_bh_pci_idx = []
-    for pci_idx in list_of_boards:
-        try:
-            chip = PciChip(pci_interface=pci_idx)
-        except Exception as e:
-            print(
-                CMD_LINE_COLOR.RED,
-                f"Error accessing board at pci index {pci_idx}! Use -ls to see all devices available to reset",
-                CMD_LINE_COLOR.ENDC,
-            )
-        if chip.as_wh():
-            reset_wh_pci_idx.append(pci_idx)
-        elif chip.as_bh():
-            reset_bh_pci_idx.append(pci_idx)
-        else:
-            print(f"{CMD_LINE_COLOR.RED}Unknown chip!!{CMD_LINE_COLOR.ENDC}")
-            sys.exit(1)
+    if use_luwen:
+        reset_wh_pci_idx = []
+        reset_bh_pci_idx = []
+        for pci_idx in list_of_boards:
+            try:
+                chip = PciChip(pci_interface=pci_idx)
+            except Exception as e:
+                print(
+                    CMD_LINE_COLOR.RED,
+                    f"Error accessing board at pci index {pci_idx}! Use -ls to see all devices available to reset",
+                    CMD_LINE_COLOR.ENDC,
+                )
+            if chip.as_wh():
+                reset_wh_pci_idx.append(pci_idx)
+            elif chip.as_bh():
+                reset_bh_pci_idx.append(pci_idx)
+            else:
+                print(f"{CMD_LINE_COLOR.RED}Unknown chip!!{CMD_LINE_COLOR.ENDC}")
+                sys.exit(1)
 
-    # reset wh devices with pci indices
-    if len(reset_wh_pci_idx) > 0:
-        WHChipReset().full_lds_reset(pci_interfaces=reset_wh_pci_idx, silent=True)
+        # reset wh devices with pci indices
+        if len(reset_wh_pci_idx) > 0:
+            WHChipReset().full_lds_reset(pci_interfaces=reset_wh_pci_idx, silent=True)
 
-    if len(reset_bh_pci_idx) > 0:
-        BHChipReset().full_lds_reset(pci_interfaces=reset_bh_pci_idx, silent=True)
+        if len(reset_bh_pci_idx) > 0:
+            BHChipReset().full_lds_reset(pci_interfaces=reset_bh_pci_idx, silent=True)
+    else:
+        chips = PCIDevice.enumerate_devices_info()
+        reset_pci_idx = []
+        for pci_idx in list_of_boards:
+            if pci_idx not in chips:
+                print(
+                    CMD_LINE_COLOR.RED,
+                    f"Error accessing board at pci index {pci_idx}! Use -ls to see all devices available to reset",
+                    CMD_LINE_COLOR.ENDC,
+                )
+            else:
+                reset_pci_idx.append(pci_idx)
+        if len(reset_pci_idx) > 0:
+            WarmReset.warm_reset(reset_pci_idx)
 
     if reinit:
         print(
@@ -62,7 +79,10 @@ def pci_board_reset(list_of_boards: List[int], reinit=False):
             CMD_LINE_COLOR.ENDC,
         )
         try:
-            chips = detect_chips_with_callback()
+            if use_luwen:
+                _ = detect_chips_with_callback()
+            else:
+                _ = TopologyDiscovery.discover()
         except Exception as e:
             print(
                 CMD_LINE_COLOR.RED,
