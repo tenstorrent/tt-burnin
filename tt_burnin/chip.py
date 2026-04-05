@@ -16,8 +16,17 @@ from pyluwen import detect_chips_fallible as luwen_detect_chips_fallible
 
 class TTChip:
     def __init__(self, chip: PciChip):
-        self.luwen_chip = chip
-        self.interface_id = chip.pci_interface_id()
+        self.chip = chip
+        
+        if chip.as_wh() is not None:
+            self.luwen_chip = chip.as_wh()
+        elif chip.as_bh() is not None:
+            self.luwen_chip = chip.as_bh()
+        else:
+            raise ValueError("Did not recognize board")
+        luwen_eth_coord = self.luwen_chip.get_local_coord()
+        self.eth_coord = (luwen_eth_coord.shelf_x, luwen_eth_coord.shelf_y, luwen_eth_coord.rack_x, luwen_eth_coord.rack_y)
+        self.interface_id = self.luwen_chip.pci_interface_id()
 
         self._harvesting_bits = None
 
@@ -29,7 +38,7 @@ class TTChip:
     def arch(self) -> str: ...
 
     def get_telemetry(self) -> Telemetry:
-        self.telemetry_cache = self.luwen_chip.get_telemetry()
+        self.telemetry_cache = self.chip.get_telemetry()
         return self.telemetry_cache
 
     def get_telemetry_unchanged(self) -> Telemetry:
@@ -54,32 +63,32 @@ class TTChip:
         )
 
     def board_type(self):
-        return self.luwen_chip.pci_board_type()
+        return self.chip.pci_board_type()
 
     def board_id(self):
         telem = self.get_telemetry_unchanged()
         return telem.board_id
 
     def noc_read(self, noc: int, x: int, y: int, addr: int, data: bytes):
-        self.luwen_chip.noc_read(noc, x, y, addr, data)
+        self.chip.noc_read(noc, x, y, addr, data)
 
     def noc_read32(self, noc: int, x: int, y: int, addr: int):
-        return self.luwen_chip.noc_read32(noc, x, y, addr)
+        return self.chip.noc_read32(noc, x, y, addr)
 
     def noc_write(self, noc: int, x: int, y: int, addr: int, data: bytes):
-        self.luwen_chip.noc_write(noc, x, y, addr, data)
+        self.chip.noc_write(noc, x, y, addr, data)
 
     def noc_write32(self, noc: int, x: int, y: int, addr: int, data: int):
-        self.luwen_chip.noc_write32(noc, x, y, addr, data)
+        self.chip.noc_write32(noc, x, y, addr, data)
 
     def noc_broadcast(self, noc: int, addr: int, data: bytes):
-        self.luwen_chip.noc_broadcast(noc, addr, data)
+        self.chip.noc_broadcast(noc, addr, data)
 
     def noc_broadcast32(self, noc: int, addr: int, data: int):
-        self.luwen_chip.noc_broadcast32(noc, addr, data)
+        self.chip.noc_broadcast32(noc, addr, data)
 
     def arc_msg(self, *args, **kwargs):
-        return self.luwen_chip.arc_msg(*args, **kwargs)
+        return self.chip.arc_msg(*args, **kwargs)
 
     # Given non-negative integer x, return an iterable containing the bits set in x, in increasing order.
     def _int_to_bits(self, x):
@@ -162,10 +171,6 @@ class BhChip(TTChip):
 
         return set(good_cores)
 
-    def coord(self):
-        coord = self.luwen_chip.get_local_coord()
-        return (coord.shelf_x, coord.shelf_y, coord.rack_x, coord.rack_y)
-
     def arch(self):
         return "Blackhole"
 
@@ -217,10 +222,6 @@ class WhChip(TTChip):
     def __repr__(self):
         return f"Wormhole[{self.interface_id}]"
 
-    def coord(self):
-        coord = self.luwen_chip.get_local_coord()
-        return (coord.shelf_x, coord.shelf_y, coord.rack_x, coord.rack_y)
-
 
 class RemoteWhChip(WhChip):
     def __init__(self, *args, **kwargs):
@@ -230,11 +231,11 @@ class RemoteWhChip(WhChip):
 
     def noc_broadcast(self, noc: int, addr: int, data: bytes):
         for core in self.get_tensix_locations():
-            self.luwen_chip.noc_write(noc, *core, addr, data)
+            self.chip.noc_write(noc, *core, addr, data)
 
     def noc_broadcast32(self, noc: int, addr: int, data: int):
         for core in self.get_tensix_locations():
-            self.luwen_chip.noc_write32(noc, *core, addr, data)
+            self.chip.noc_write32(noc, *core, addr, data)
 
 
 def detect_local_chips(ignore_ethernet: bool = False) -> list[Union[WhChip, BhChip]]:

@@ -145,18 +145,17 @@ def print_all_available_devices(devices):
     console = get_console()
     table = Table()
     table.add_column("Pci Dev ID")
-    table.add_column("Board Type")
     table.add_column("Device Series")
+    table.add_column("Board Type")
     table.add_column("Board Number")
     table.add_column("Coordinates")
     for i, device in enumerate(devices):
-        chip = device.luwen_chip
         board_id = hex(device.board_id()).replace("0x", "")
         board_type = get_board_type(board_id)
         device_series = device.arch()
         pci_dev_id = device.interface_id if not device.is_remote else "N/A"
-        coords = device.coord()
-        if isinstance(chip, WhChip):
+        coords = device.eth_coord
+        if isinstance(device, WhChip):
             suffix = " R" if device.is_remote else " L"
             board_type = board_type + suffix
 
