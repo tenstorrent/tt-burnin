@@ -147,6 +147,42 @@ def read_hex_image_chunks(f: IO[bytes]) -> Iterable[Tuple[int, bytes]]:
         yield addr, buffer
 
 
+# A broadcast lands on every live tensix simultaneously, so a single readback is
+# enough to confirm it. Sample a few cores from *distinct* columns and accept the
+# load if ANY of them matches. That way one mis-reported column -- one the
+# firmware claims is enabled but is actually harvested and reads back zero --
+# can't fail the check, while a genuinely failed broadcast (no core has the data)
+# still raises. It also avoids reading every tensix, which trips on harvested
+# NIUs.
+def _sample_broadcast_cores(chip: Chip, max_cores: int = 4) -> list:
+    cores_by_col: Dict[int, CoreId] = {}
+    for core in sorted(chip.get_tensix_locations()):
+        if core[0] not in cores_by_col:
+            cores_by_col[core[0]] = core
+            if len(cores_by_col) >= max_cores:
+                break
+    return list(cores_by_col.values())
+
+
+def _verify_broadcast(
+    chip: Chip, cores: Collection[CoreId], address: int, data: bytes
+) -> None:
+    mismatch = None
+    for core in cores:
+        buffer = bytearray(len(data))
+        chip.noc_read(0, *core, address, buffer)
+        if buffer == data:
+            return
+        if mismatch is None:
+            mismatch = (core, buffer)
+    # No sampled core had the data: the broadcast genuinely did not land.
+    core, buffer = mismatch
+    for b, d in zip(buffer, data):
+        assert (
+            b == d
+        ), f"Failed to write to core {core} at address {address} ({b} != {d})"
+
+
 def load_hex(chip: Chip, cores: Optional[Collection[CoreId]], bin: IO[bytes]) -> None:
     for address, data in read_hex_image_chunks(bin):
         if cores is None:
@@ -157,9 +193,15 @@ def load_hex(chip: Chip, cores: Optional[Collection[CoreId]], bin: IO[bytes]) ->
 
 
 def check_hex(chip: Chip, cores: Optional[Collection[CoreId]], bin: IO[bytes]) -> None:
+    sample = None
     for address, data in read_hex_image_chunks(bin):
         if cores is None:
-            cores = chip.get_tensix_locations()
+            if sample is None:
+                sample = _sample_broadcast_cores(chip)
+                if not sample:
+                    return
+            _verify_broadcast(chip, sample, address, data)
+            continue
         for core in cores:
             buffer = bytearray(len(data))
             chip.noc_read(0, *core, address, buffer)
@@ -179,9 +221,15 @@ def load_bin(chip: Chip, cores: Optional[Collection[CoreId]], bin: IO[bytes]) ->
                 chip.noc_write(0, *core, address, data)
 
 def check_bin(chip: Chip, cores: Optional[Collection[CoreId]], bin: IO[bytes]) -> None:
+    sample = None
     for address, data in read_bin_image_chunks(bin):
         if cores is None:
-            cores = chip.get_tensix_locations()
+            if sample is None:
+                sample = _sample_broadcast_cores(chip)
+                if not sample:
+                    return
+            _verify_broadcast(chip, sample, address, data)
+            continue
         for core in cores:
             buffer = bytearray(len(data))
             chip.noc_read(0, *core, address, buffer)

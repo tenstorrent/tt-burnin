@@ -207,27 +207,28 @@ class BhChip(TTChip):
 
     def get_tensix_locations(self):
         if self.noc_translation_enabled:
-            # When translated NOC 0 looks roughly the same as without translation
-            # with the minor difference that the harvested tensix are moved to the
-            # end (right side) of the grid
-            NUM_TENSIX_X = 0
-            enabled_tensix_columns_bitmask = self.enabled_tensix_columns
-            while enabled_tensix_columns_bitmask != 0:
-                if enabled_tensix_columns_bitmask & 0x1 != 0:
-                    NUM_TENSIX_X += 1
-                enabled_tensix_columns_bitmask >>= 1
+            # With NOC translation enabled the live tensix are packed to the low
+            # (left) end of the grid and harvested columns are moved to the right,
+            # so the first popcount(enabled) NOC0 columns are the live ones.
+            # Columns 8 and 9 are not tensix, so the NOC0 column maps to a logical
+            # index of col-1 for cols 1-7 and col-3 for cols 10-16.
+            num_enabled = bin(self.enabled_tensix_columns).count("1")
 
             good_cores = []
             for core in self.TENSIX_LOCATIONS:
-                if (core[0] <= 7 and core[0] < NUM_TENSIX_X) or (core[0] >= 10 and (core[0] - 2) < NUM_TENSIX_X):
+                col = core[0]
+                logical_index = col - 1 if col <= 7 else col - 3
+                if logical_index < num_enabled:
                     good_cores.append(core)
         else:
             enabled_tensix_columns_bitmask = self.enabled_tensix_columns
             enabled_tensix_columns = []
-            TENSIX_COLS = [1, 2, 3, 4, 5, 6, 7, 10, 11, 12, 13, 14, 15, 16]
-            for col in range(self.NUM_TENSIX_X):
-                if enabled_tensix_columns_bitmask & 0x1 == 1:
-                    enabled_tensix_columns.append(TENSIX_COLS[col])
+            # Bit i indexes die-physical column i (interleaved across the NOC0 grid),
+            # not NOC0 column i. Mirrors firmware TensixPhysXToNoc / tt-umd HARVESTING_NOC_LOCATIONS.
+            HARVESTING_NOC_LOCATIONS = [1, 16, 2, 15, 3, 14, 4, 13, 5, 12, 6, 11, 7, 10]
+            for bit in range(self.NUM_TENSIX_X):
+                if enabled_tensix_columns_bitmask & 0x1:
+                    enabled_tensix_columns.append(HARVESTING_NOC_LOCATIONS[bit])
                 enabled_tensix_columns_bitmask >>= 1
 
             enabled_tensix_columns = set(enabled_tensix_columns)
