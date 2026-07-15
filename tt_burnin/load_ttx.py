@@ -164,18 +164,33 @@ def _sample_broadcast_cores(chip: Chip, max_cores: int = 4) -> list:
     return list(cores_by_col.values())
 
 
+# Under concurrent multi-chip load a large broadcast write is occasionally
+# truncated: the head of the chunk lands but the tail reads back as zero. The
+# bytes were never written, so re-reading cannot recover them, but re-issuing the
+# broadcast does. On a verify miss, re-broadcast the chunk and re-check a few
+# times before treating it as a genuine failure.
+_BROADCAST_RETRIES = 3
+
+
 def _verify_broadcast(
     chip: Chip, cores: Collection[CoreId], address: int, data: bytes
 ) -> None:
     mismatch = None
-    for core in cores:
-        buffer = bytearray(len(data))
-        chip.noc_read(0, *core, address, buffer)
-        if buffer == data:
-            return
-        if mismatch is None:
-            mismatch = (core, buffer)
-    # No sampled core had the data: the broadcast genuinely did not land.
+    for attempt in range(_BROADCAST_RETRIES + 1):
+        mismatch = None
+        for core in cores:
+            buffer = bytearray(len(data))
+            chip.noc_read(0, *core, address, buffer)
+            if buffer == data:
+                return
+            if mismatch is None:
+                mismatch = (core, buffer)
+        # No sampled core had the data. A dropped write is only recovered by
+        # writing again, so re-broadcast the chunk and re-check while retries
+        # remain.
+        if attempt < _BROADCAST_RETRIES:
+            chip.noc_broadcast(0, address, data)
+    # Still failing after re-broadcasts: the broadcast genuinely did not land.
     core, buffer = mismatch
     for b, d in zip(buffer, data):
         assert (
