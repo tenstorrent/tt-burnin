@@ -3,10 +3,13 @@
 from typing import List
 import sys
 import os
+import fcntl
+import struct
 import json
 import jsons
 import time
 import random
+from concurrent.futures import ThreadPoolExecutor
 from rich.table import Table
 
 from rich import get_console
@@ -17,6 +20,10 @@ from tt_tools_common.reset_common.wh_reset import WHChipReset
 from tt_tools_common.reset_common.galaxy_reset import GalaxyReset
 from tt_tools_common.utils_common.tools_utils import (
     detect_chips_with_callback,
+)
+from tt_tools_common.utils_common.system_utils import (
+    get_driver_version,
+    is_driver_version_at_least,
 )
 from pyluwen import (
     detect_chips_fallible,
@@ -256,6 +263,62 @@ def timed_wait(seconds):
         sys.stdout.flush()
     print()
 
+# KMD reset ioctl (TENSTORRENT_IOCTL_RESET_DEVICE). The Galaxy IPMI tray reset on
+# its own leaves the ASICs with ARC uninitialized (detection then fails with
+# "ARC Status: 0 out of 1 initialized"); waiting longer never recovers them. The
+# KMD reset handshake tt-smi performs is required: USER_RESET before the tray
+# reset and POST_RESET once the chips reappear.
+_TT_IOCTL_MAGIC = 0xFA
+_TT_IOCTL_RESET_DEVICE = (_TT_IOCTL_MAGIC << 8) | 6
+_RESET_FLAG_PCIE_LINK = 1
+_RESET_FLAG_USER = 3
+_RESET_FLAG_POST = 6
+
+
+def _tt_interface_ids() -> List[int]:
+    """Interface ids of the local Tenstorrent devices (i.e. /dev/tenstorrent/N)."""
+    try:
+        return sorted(int(e) for e in os.listdir("/dev/tenstorrent") if e.isdigit())
+    except OSError:
+        return []
+
+
+def _reset_device_ioctl(interface_id: int, flags: int) -> bool:
+    """Issue TENSTORRENT_IOCTL_RESET_DEVICE on one device, returning True on success."""
+    # O_APPEND signals to KMD >= 2.6.0 that we are power-aware.
+    fd = os.open(
+        f"/dev/tenstorrent/{interface_id}", os.O_RDWR | os.O_CLOEXEC | os.O_APPEND
+    )
+    try:
+        # struct: in {output_size_bytes, flags}, out {reserved, result}
+        out_size = struct.calcsize("II")
+        buf = bytearray(struct.pack("IIII", out_size, flags, 0, 0))
+        fcntl.ioctl(fd, _TT_IOCTL_RESET_DEVICE, buf)
+        _, result = struct.unpack("II", buf[struct.calcsize("II") :])
+        return result == 0
+    finally:
+        os.close(fd)
+
+
+def _reset_all_ioctl(device_ids: List[int], flags: int) -> List[int]:
+    """Issue a reset ioctl on every device in parallel; return the ones that failed."""
+    if not device_ids:
+        return []
+    failed: List[int] = []
+
+    def one(interface_id: int):
+        try:
+            return interface_id, _reset_device_ioctl(interface_id, flags)
+        except OSError:
+            return interface_id, False
+
+    with ThreadPoolExecutor(max_workers=len(device_ids)) as pool:
+        for interface_id, ok in pool.map(one, device_ids):
+            if not ok:
+                failed.append(interface_id)
+    return failed
+
+
 def reset_6u_glx():
     """Reset Galaxy trays and detect chips post reset."""
     print(
@@ -263,9 +326,28 @@ def reset_6u_glx():
         f"Resetting Galaxy trays with reset command...",
         CMD_LINE_COLOR.ENDC,
     )
+    # Quiesce the devices through the KMD before the tray reset: a secondary bus
+    # reset (KMD >= 2.7.0) followed by USER_RESET.
+    device_ids = _tt_interface_ids()
+    driver = get_driver_version()
+    if driver is not None and is_driver_version_at_least(driver, "2.7.0"):
+        _reset_all_ioctl(device_ids, _RESET_FLAG_PCIE_LINK)
+    _reset_all_ioctl(device_ids, _RESET_FLAG_USER)
+
     run_wh_ubb_ipmi_reset(ubb_num="0xF", dev_num="0xFF", op_mode="0x0", reset_time="0xF")
     timed_wait(30)
     run_ubb_wait_for_driver_load()
+
+    # Re-establish the devices after they reappear on the bus. Without POST_RESET
+    # the ASICs stay with ARC uninitialized and detection fails.
+    post_failed = _reset_all_ioctl(_tt_interface_ids(), _RESET_FLAG_POST)
+    if post_failed:
+        print(
+            CMD_LINE_COLOR.RED,
+            f"POST_RESET failed for devices: {post_failed}",
+            CMD_LINE_COLOR.ENDC,
+        )
+
     print(
         CMD_LINE_COLOR.PURPLE,
         f"Re-initializing boards after reset....",
