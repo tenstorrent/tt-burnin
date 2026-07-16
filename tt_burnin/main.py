@@ -38,8 +38,10 @@ from tt_tools_common.utils_common.tools_utils import (
     detect_chips_with_callback,
 )
 
+from tt_umd import TopologyDiscovery
 
-def reset_all_devices(devices, reset_filename=None):
+
+def reset_all_devices(devices, reset_filename=None, use_luwen: bool = False):
     """Reset all devices"""
     print(CMD_LINE_COLOR.BLUE, "Resetting devices on host...", CMD_LINE_COLOR.ENDC)
     LOG_FOLDER = os.path.expanduser("~/.config/tenstorrent")
@@ -68,14 +70,14 @@ def reset_all_devices(devices, reset_filename=None):
         parsed_dict = mobo_reset_from_json(data)
         pci_indices, reinit = pci_indices_from_json(parsed_dict)
         if pci_indices:
-            pci_board_reset(pci_indices, reinit)
+            pci_board_reset(pci_indices, reinit, use_luwen=use_luwen)
     else:
         # reset all boards
         dev_ids = []
         for device in devices:
             if not device.is_remote():
                 dev_ids.append(device.get_pci_interface_id())
-        pci_board_reset(dev_ids, reinit=True)
+        pci_board_reset(dev_ids, reinit=True, use_luwen=use_luwen)
 
 
 def start_burnin_wh(
@@ -232,21 +234,32 @@ def parse_args():
         default=False,
         help="Don't load the power virus workload, just run the tensix idle",
     )
+    parser.add_argument(
+        "--use_luwen",
+        default=False,
+        action="store_true",
+        help="Use deprecated Luwen driver instead of UMD (default).",
+    )
     # subparsers = parser.add_subparsers(title="command", dest="command", required=True)
     return parser.parse_args()
 
-def detect_and_group_devices():
-    all_devices = detect_chips_with_callback()
+def detect_and_group_devices(use_luwen: bool = False):
+    if use_luwen:
+        all_devices = dict(enumerate(detect_chips_with_callback()))
+        umd_cluster_descriptor = None
+    else:
+        umd_cluster_descriptor, all_devices = TopologyDiscovery.discover()
     devs = []
     devices = []
-    for device in all_devices:
+    for idx, device in all_devices.items():
         if device.as_wh() is not None:
+            eth_coord = umd_cluster_descriptor.get_chip_locations()[idx] if umd_cluster_descriptor else None
             if device.is_remote():
-                devs.append(RemoteWhChip(device.as_wh()))
+                devs.append(RemoteWhChip(device, eth_coord))
             else:
-                devs.append(WhChip(device.as_wh()))
+                devs.append(WhChip(device, eth_coord))
         elif device.as_bh() is not None:
-            devs.append(BhChip(device.as_bh()))
+            devs.append(BhChip(device))
         else:
             raise ValueError("Did not recognize board")
         devices.append(device)
@@ -256,7 +269,10 @@ def detect_and_group_devices():
         # Raise power state to high (BH)
         for device in devices:
             try:
-                device.set_power_state("high")
+                if use_luwen:
+                    device.set_power_state("high")
+                else:
+                    device.set_power_state(True)
             except:
                 print(
                     CMD_LINE_COLOR.RED,
@@ -279,14 +295,14 @@ def main():
     # os.environ["RUST_BACKTRACE"] = "full"
     # Allow non blocking read for accepting user input before stopping burnin
     os.set_blocking(sys.stdin.fileno(), False)
-    devs, devices = detect_and_group_devices()
+    devs, devices = detect_and_group_devices(args.use_luwen)
     print_all_available_devices(devs)
     if not args.no_reset:
-        reset_all_devices(devices, reset_filename=args.reset)
+        reset_all_devices(devices, reset_filename=args.reset, use_luwen=args.use_luwen)
 
     # Force garbage collection on the old devices and start with new device objects after reset
     garbage_collect_all_devices(devices)
-    devs, devices = detect_and_group_devices()
+    devs, devices = detect_and_group_devices(args.use_luwen)
     try:
         print()
         print(
@@ -322,13 +338,13 @@ def main():
         )
 
         # Create a live update for telemetry widget
-        with Live(Group(generate_table(devices), text), refresh_per_second=10) as live:
+        with Live(Group(generate_table(devices, args.use_luwen), text), refresh_per_second=10) as live:
             while True:
                 # Break if there is any user keypress
                 c = sys.stdin.read(1)
                 if len(c) > 0:
                     break
-                live.update(Group(generate_table(devices), text))
+                live.update(Group(generate_table(devices, args.use_luwen), text))
                 time.sleep(0.1)
     except Exception as e:
         import traceback
@@ -361,7 +377,7 @@ def main():
 
         # Final reset to restore state
         if not args.no_reset:
-            reset_all_devices(devices, reset_filename=args.reset)
+            reset_all_devices(devices, reset_filename=args.reset, use_luwen=args.use_luwen)
 
         # Force garbage collection on the old devices and start with new device objects after reset
         garbage_collect_all_devices(devices)
