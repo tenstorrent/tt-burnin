@@ -1,3 +1,13 @@
+tt-burnin (0.4.3) noble; urgency=medium
+
+  [ Zakhary Kaplan ]
+  * fix(bh): perform KMD reset handshake on galaxy 6U reset
+
+  [ Tenstorrent Releases ]
+  * pyproject.toml- updating version to 0.4.3
+
+ -- Tenstorrent Releases <releases@tenstorrent.com>  Thu, 16 Jul 2026 15:23:00 +0000
+
 tt-burnin (0.4.2) noble; urgency=medium
 
   [ Zakhary Kaplan ]
