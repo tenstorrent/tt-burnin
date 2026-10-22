@@ -7,6 +7,7 @@ to run a high power consumption workload on TT devices.
 from __future__ import annotations
 
 import os
+import re
 import sys
 import time
 import argparse
@@ -194,6 +195,54 @@ def stop_burnin_bh(device):
     )
 
 
+
+_DURATION_TOKEN_RE = re.compile(r"^\s*(?:(\d+(?:\.\d+)?)\s*([smhdSMHD]?))\s*$")
+_DURATION_MULTI_RE = re.compile(r"(\d+(?:\.\d+)?)\s*([smhdSMHD])")
+_UNIT_SECONDS = {
+    "": 1.0,
+    "s": 1.0,
+    "m": 60.0,
+    "h": 3600.0,
+    "d": 86400.0,
+}
+
+
+def parse_duration(value: str) -> float:
+    """Parse a duration string (e.g. '3600', '30m', '2h', '1d', '1h30m') into seconds."""
+    if value is None:
+        raise argparse.ArgumentTypeError("Duration value cannot be empty")
+    raw = value.strip()
+    if not raw:
+        raise argparse.ArgumentTypeError("Duration value cannot be empty")
+
+    single = _DURATION_TOKEN_RE.match(raw)
+    if single:
+        amount = float(single.group(1))
+        unit = single.group(2).lower()
+        total_seconds = amount * _UNIT_SECONDS[unit]
+    else:
+        matches = list(_DURATION_MULTI_RE.finditer(raw))
+        if not matches or "".join(m.group(0) for m in matches).replace(" ", "") != raw.replace(" ", ""):
+            raise argparse.ArgumentTypeError(
+                f"Invalid duration '{value}'. Expected seconds or <number>[s|m|h|d] (e.g. 3600, 30m, 2h, 1d)."
+            )
+        total_seconds = sum(
+            float(m.group(1)) * _UNIT_SECONDS[m.group(2).lower()] for m in matches
+        )
+
+    if total_seconds <= 0:
+        raise argparse.ArgumentTypeError("Duration must be greater than 0 seconds")
+    return total_seconds
+
+
+def format_duration(seconds: float) -> str:
+    """Format a duration in seconds as HH:MM:SS."""
+    total = max(0, int(round(seconds)))
+    hours, rem = divmod(total, 3600)
+    minutes, secs = divmod(rem, 60)
+    return f"{hours:02d}:{minutes:02d}:{secs:02d}"
+
+
 def parse_args():
     # Parse arguments
     parser = argparse.ArgumentParser(description=__doc__)
@@ -231,6 +280,17 @@ def parse_args():
         action="store_true",
         default=False,
         help="Don't load the power virus workload, just run the tensix idle",
+    )
+    parser.add_argument(
+        "-d",
+        "--duration",
+        type=parse_duration,
+        default=None,
+        metavar="DURATION",
+        help=(
+            "Run burn-in for a specified duration and stop automatically "
+            "(e.g. 3600, 30m, 2h, 1d)."
+        ),
     )
     # subparsers = parser.add_subparsers(title="command", dest="command", required=True)
     return parser.parse_args()
@@ -277,8 +337,15 @@ def main():
     args = parse_args()
     # Uncomment the below to display a full Rust backtrace on error
     # os.environ["RUST_BACKTRACE"] = "full"
-    # Allow non blocking read for accepting user input before stopping burnin
-    os.set_blocking(sys.stdin.fileno(), False)
+    # Allow non blocking read for accepting user input before stopping burnin when stdin is a TTY
+    interactive_stdin = False
+    try:
+        if sys.stdin is not None and sys.stdin.isatty():
+            os.set_blocking(sys.stdin.fileno(), False)
+            interactive_stdin = True
+    except (OSError, ValueError):
+        interactive_stdin = False
+
     devs, devices = detect_and_group_devices()
     print_all_available_devices(devs)
     if not args.no_reset:
@@ -317,18 +384,37 @@ def main():
         for t in threads:
             t.join()
 
-        text = Text(
-            " Press Enter to STOP TT-Burnin on all boards...", style="bold yellow"
-        )
+        start_time = time.monotonic()
+
+        def build_status_text(elapsed_s: float) -> Text:
+            if args.duration is not None:
+                remaining_s = max(0.0, args.duration - elapsed_s)
+                msg = (
+                    f" Running TT-Burnin ({format_duration(elapsed_s)} / "
+                    f"{format_duration(args.duration)}, "
+                    f"{format_duration(remaining_s)} remaining)."
+                )
+                if interactive_stdin:
+                    msg += " Press Enter to STOP TT-Burnin on all boards..."
+                return Text(msg, style="bold yellow")
+            return Text(
+                " Press Enter to STOP TT-Burnin on all boards...", style="bold yellow"
+            )
+
+        text = build_status_text(0.0)
 
         # Create a live update for telemetry widget
         with Live(Group(generate_table(devices), text), refresh_per_second=10) as live:
             while True:
-                # Break if there is any user keypress
-                c = sys.stdin.read(1)
-                if len(c) > 0:
+                if interactive_stdin:
+                    # Break if there is any user keypress
+                    c = sys.stdin.read(1)
+                    if len(c) > 0:
+                        break
+                elapsed = time.monotonic() - start_time
+                if args.duration is not None and elapsed >= args.duration:
                     break
-                live.update(Group(generate_table(devices), text))
+                live.update(Group(generate_table(devices), build_status_text(elapsed)))
                 time.sleep(0.1)
     except Exception as e:
         import traceback
