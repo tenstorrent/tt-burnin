@@ -9,6 +9,7 @@ import json
 import jsons
 import time
 import random
+import subprocess
 from concurrent.futures import ThreadPoolExecutor
 from rich.table import Table
 
@@ -27,7 +28,6 @@ from tt_tools_common.utils_common.system_utils import (
 )
 from pyluwen import (
     detect_chips_fallible,
-    run_wh_ubb_ipmi_reset,
     run_ubb_wait_for_driver_load
 )
 from tt_burnin.chip import RemoteWhChip, WhChip
@@ -319,6 +319,63 @@ def _reset_all_ioctl(device_ids: List[int], flags: int) -> List[int]:
     return failed
 
 
+# BMC v0.05.22 adds op_mode 0x3: UBB reset without RST_RETIMER_PERST_N.
+# op_mode 0x0 is the legacy command that also asserts RST_RETIMER_PERST_N.
+_MIN_BMC_VERSION_NO_RETIMER = "0.05.22"
+_GLX_OP_MODE_WITH_RETIMER = "0x0"
+_GLX_OP_MODE_NO_RETIMER = "0x3"
+
+
+def _glx_ipmi_reset(op_mode: str) -> str:
+    """Issue a full Galaxy UBB IPMI reset, returning failure output or an empty string."""
+    cmd = ["sudo", "ipmitool", "raw", "0x30", "0x8B", "0xF", "0xFF", op_mode, "0xF"]
+    print(f"Executing command: {' '.join(cmd)}")
+    try:
+        result = subprocess.run(cmd, capture_output=True, text=True)
+    except FileNotFoundError as e:
+        raise RuntimeError(
+            "Failed to execute ipmitool. Ensure ipmitool is installed and sudo is available."
+        ) from e
+    if result.returncode == 0:
+        return ""
+    return f"{result.stdout}{result.stderr}".strip() or f"exit code {result.returncode}"
+
+
+def run_glx_ipmi_reset():
+    """
+    Reset all Galaxy trays over IPMI, preferring no-retimer op_mode 0x3.
+
+    BMC firmware v0.05.22 or later accepts 0x3. Older BMCs reject it with
+    IPMI completion code 0xc9 (Parameter out of range) and do not reset.
+    On any 0x3 failure, print a warning and fall back to legacy op_mode 0x0
+    so the tray reset still goes through.
+    """
+    failure = _glx_ipmi_reset(_GLX_OP_MODE_NO_RETIMER)
+    if not failure:
+        return
+
+    text = failure.lower()
+    if "rsp=0xc9" in text or "parameter out of range" in text:
+        print(
+            f"{CMD_LINE_COLOR.YELLOW}WARNING! "
+            f"This Galaxy is on BMC < v{_MIN_BMC_VERSION_NO_RETIMER}, "
+            "so reset without PCIe retimer (op_mode 0x3) is not supported. "
+            f"Upgrade BMC firmware to v{_MIN_BMC_VERSION_NO_RETIMER} or later to enable it.{CMD_LINE_COLOR.ENDC}\n"
+            f"{CMD_LINE_COLOR.BLUE}Falling back to legacy retimer reset (op_mode {_GLX_OP_MODE_WITH_RETIMER})...{CMD_LINE_COLOR.ENDC}"
+        )
+    else:
+        print(
+            f"{CMD_LINE_COLOR.YELLOW}WARNING!{CMD_LINE_COLOR.ENDC} "
+            f"Galaxy no-retimer IPMI reset (op_mode {_GLX_OP_MODE_NO_RETIMER}) failed:\n"
+            f"{failure}\n"
+            f"{CMD_LINE_COLOR.BLUE}Falling back to legacy retimer reset (op_mode {_GLX_OP_MODE_WITH_RETIMER})...{CMD_LINE_COLOR.ENDC}"
+        )
+
+    failure = _glx_ipmi_reset(_GLX_OP_MODE_WITH_RETIMER)
+    if failure:
+        raise RuntimeError(f"IPMI command failed: {failure}")
+
+
 def reset_6u_glx():
     """Reset Galaxy trays and detect chips post reset."""
     print(
@@ -334,7 +391,7 @@ def reset_6u_glx():
         _reset_all_ioctl(device_ids, _RESET_FLAG_PCIE_LINK)
     _reset_all_ioctl(device_ids, _RESET_FLAG_USER)
 
-    run_wh_ubb_ipmi_reset(ubb_num="0xF", dev_num="0xFF", op_mode="0x0", reset_time="0xF")
+    run_glx_ipmi_reset()
     timed_wait(30)
     run_ubb_wait_for_driver_load()
 
