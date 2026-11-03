@@ -1,3 +1,14 @@
+tt-burnin (0.4.5) resolute; urgency=medium
+
+  [ Zakhary Kaplan ]
+  * feat(reset): prefer no-retimer galaxy reset
+  * fix(ci): sign debs by key fingerprint
+
+  [ Tenstorrent Releases ]
+  * pyproject.toml- updating version to 0.4.5
+
+ -- Tenstorrent Releases <releases@tenstorrent.com>  Tue, 03 Nov 2026 19:28:43 +0000
+
 tt-burnin (0.4.4) noble; urgency=medium
 
   [ Zakhary Kaplan ]
