@@ -126,7 +126,8 @@ jobs:
           NAME: Tenstorrent Releases
       - run: |
           gbp buildpackage \
-            --git-ignore-new
+            --git-ignore-new \
+            -k"${DEBSIGN_KEYID}"
         #continue-on-error: true
         env:
           DEBSIGN_KEYID: ${{ steps.gpg_key_import.outputs.fingerprint }}
